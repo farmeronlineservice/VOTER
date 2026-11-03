@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voter Management System</title>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet" />
+  <style>
+    body { background: #f0f2f5; font-family: system-ui, sans-serif; }
+    .navbar { background: linear-gradient(135deg, #1a237e, #0d47a1) !important; }
+    .stat-card { border-radius: 12px; border: none; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+    .voter-card { border-radius: 10px; border: 1px solid #e0e0e0; background: #fff; margin-bottom: 8px; }
+    .voter-card.ours { border-left: 4px solid #198754; }
+    .voter-card.other { border-left: 4px solid #dc3545; }
+    .voter-card.undecided { border-left: 4px solid #6c757d; }
+    .status-chip { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: .7rem; font-weight: 500; margin: 1px; }
+    .chip-contacted { background: #cfe2ff; color: #084298; }
+    .chip-voted { background: #d1e7dd; color: #0f5132; }
+    .chip-slip { background: #fff3cd; color: #664d03; }
+    .chip-symbol { background: #e2d9f3; color: #432874; }
+    .chip-old { background: #f8d7da; color: #842029; }
+    .search-box { position: sticky; top: 0; z-index: 100; background: #f0f2f5; padding: 10px 0; }
+    .filter-bar { background: #fff; border-radius: 10px; padding: 10px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+    .ward-pill { background: #e7f1ff; color: #0d6efd; padding: 2px 8px; border-radius: 12px; font-size: .75rem; }
+    .house-pill { background: #f0f0f0; color: #333; padding: 2px 8px; border-radius: 12px; font-size: .75rem; }
+    .btn-xs { padding: .15rem .4rem; font-size: .75rem; }
+    #loadingOverlay { position: fixed; inset: 0; background: rgba(255,255,255,.85); display: none; align-items: center; justify-content: center; z-index: 9999; }
+    .pagination-bar { background: #fff; border-radius: 10px; padding: 10px; margin-top: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+    .table-sm td, .table-sm th { font-size: .85rem; vertical-align: middle; }
+    .modal-body { max-height: 70vh; overflow-y: auto; }
+    .voter-name { word-break: break-word; }
+    .family-row.ours { border-left: 4px solid #198754 !important; }
+    .family-row.other { border-left: 4px solid #dc3545 !important; }
+    .family-row.undecided { border-left: 4px solid #6c757d !important; }
+    @media (max-width: 768px) {
+      .navbar-brand { font-size: 1rem !important; }
+      .stat-card .fs-4 { font-size: 1.25rem !important; }
+      .filter-bar { gap: 6px !important; }
+      .filter-bar .btn { font-size: 0.75rem; padding: 0.35rem 0.5rem; }
+      .voter-card { padding: 0.85rem !important; }
+      .voter-card .fs-5 { font-size: 1.1rem !important; }
+      .search-box .form-control, .search-box .form-select { font-size: 16px; /* prevent iOS zoom */ }
+      .pagination-bar .btn { min-width: 48px; min-height: 40px; }
+      .btn-sm { min-height: 36px; }
+      #paginationBar { position: sticky; bottom: 0; z-index: 50; }
+    }
+    @media (max-width: 576px) {
+      .container-fluid { padding-left: 8px; padding-right: 8px; }
+      .stat-card { padding: 0.4rem !important; }
+    }
+  </style>
+</head>
+<body>
+<div id="loadingOverlay"><div class="text-center"><div class="spinner-border text-primary" style="width:3rem;height:3rem;"></div><div class="mt-2 fw-semibold" id="loadingText">Loading...</div></div></div>
+<nav class="navbar navbar-dark sticky-top shadow-sm"><div class="container-fluid">
+<span class="navbar-brand mb-0 h1 fs-5"><i class="bi bi-people-fill me-2"></i>Voter Management</span>
+<div class="d-flex gap-2">
+<button class="btn btn-sm btn-outline-light" type="button" id="btnImport"><i class="bi bi-upload"></i> Import</button>
+<button class="btn btn-sm btn-outline-light" type="button" id="btnExport"><i class="bi bi-download"></i> Excel</button>
+<button class="btn btn-sm btn-outline-light" type="button" id="btnLoadCloud"><i class="bi bi-cloud-download"></i></button>
+<span class="badge bg-secondary align-self-center" id="saveStatus">—</span>
+<button class="btn btn-sm btn-warning" type="button" id="btnSave"><i class="bi bi-cloud-upload"></i> Save</button>
+</div></div></nav>
+<div class="container-fluid py-3">
+<div class="row g-2 mb-3">
+<div class="col-4 col-md-2"><div class="card stat-card text-center p-2"><div class="fs-4 fw-bold text-primary" id="statTotal">0</div><div class="small text-muted">Total GP</div></div></div>
+<div class="col-4 col-md-2"><div class="card stat-card text-center p-2"><div class="fs-4 fw-bold text-info" id="statMale">0</div><div class="small text-muted">Male</div></div></div>
+<div class="col-4 col-md-2"><div class="card stat-card text-center p-2"><div class="fs-4 fw-bold text-danger" id="statFemale">0</div><div class="small text-muted">Female</div></div></div>
+<div class="col-4 col-md-2"><div class="card stat-card text-center p-2"><div class="fs-4 fw-bold text-success" id="statOurs">0</div><div class="small text-muted">Hamare</div></div></div>
+<div class="col-4 col-md-2"><div class="card stat-card text-center p-2"><div class="fs-4 fw-bold text-warning" id="statOther">0</div><div class="small text-muted">Doosre</div></div></div>
+<div class="col-4 col-md-2"><div class="card stat-card text-center p-2"><div class="fs-4 fw-bold text-secondary" id="statFamilies">0</div><div class="small text-muted">Families</div></div></div>
+</div>
+<div class="search-box"><div class="row g-2">
+<div class="col-12 col-md-5"><div class="input-group"><span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+<input type="text" id="searchInput" class="form-control" placeholder="Name / Father / Card / House / Sr No..." autocomplete="off" />
+<button class="btn btn-outline-secondary" type="button" id="btnClearSearch"><i class="bi bi-x-lg"></i></button></div></div>
+<div class="col-6 col-md-2"><select id="filterWard" class="form-select"><option value="">Sabhi Ward</option></select></div>
+<div class="col-6 col-md-2"><select id="filterPreference" class="form-select"><option value="">Sabhi Preference</option><option value="ours">Hamare</option><option value="other">Doosre</option><option value="undecided">Anirnit</option></select></div>
+<div class="col-6 col-md-2"><select id="filterStatus" class="form-select">
+<option value="">Sabhi Status</option><option value="contacted">Contacted</option><option value="not_contacted">Not Contacted</option>
+<option value="voted">Voted</option><option value="slip">Slip Given</option><option value="symbol">Symbol Made</option>
+<option value="old">Old Age 60+</option><option value="age80">Age 80+</option><option value="age18_30">Age 18-30</option>
+<option value="age31_45">Age 31-45</option><option value="age46_59">Age 46-59</option><option value="age60_79">Age 60-79</option>
+<option value="migrated">Migrated</option></select></div>
+<div class="col-6 col-md-1"><button class="btn btn-outline-primary w-100" type="button" id="btnToggleView"><i class="bi bi-grid-3x3-gap" id="viewIcon"></i></button></div>
+</div></div>
+<div class="filter-bar d-flex flex-wrap gap-2 align-items-center">
+<button class="btn btn-sm btn-outline-success" type="button" data-bulk="preference:ours">Mark Ours</button>
+<button class="btn btn-sm btn-outline-danger" type="button" data-bulk="preference:other">Mark Other</button>
+<button class="btn btn-sm btn-outline-primary" type="button" data-bulk="contacted:true">Mark Contacted</button>
+<button class="btn btn-sm btn-outline-warning" type="button" data-bulk="slip_given:true">Slip Given</button>
+<button class="btn btn-sm btn-outline-info" type="button" data-bulk="symbol_made:true">Symbol Made</button>
+<button class="btn btn-sm btn-dark" type="button" id="btnFullAnalysis">Full Analysis</button>
+<button class="btn btn-sm btn-outline-dark" type="button" id="btnBoothSummary">Booth Summary</button>
+<button class="btn btn-sm btn-outline-dark" type="button" id="btnWardGender">Ward Gender</button>
+<button class="btn btn-sm btn-outline-secondary" type="button" id="btnAgeList">Age List</button>
+<button class="btn btn-sm btn-secondary" type="button" id="btnPrintList"><i class="bi bi-printer"></i> Print List</button>
+<div class="ms-auto d-flex gap-2 align-items-center">
+<button class="btn btn-sm btn-success" type="button" id="btnExport2">Excel</button>
+<button class="btn btn-sm btn-outline-success" type="button" id="btnExportCsv">CSV</button>
+<span class="badge bg-secondary" id="resultCount">0 results</span>
+</div></div>
+<div id="resultsArea"></div>
+<div class="pagination-bar d-flex flex-wrap justify-content-between align-items-center" id="paginationBar" style="display:none !important;">
+<div class="small text-muted" id="pageInfo">Page 1</div>
+<div class="btn-group">
+<button class="btn btn-sm btn-outline-primary" type="button" id="btnFirst">First</button>
+<button class="btn btn-sm btn-outline-primary" type="button" id="btnPrev">Prev</button>
+<button class="btn btn-sm btn-primary" type="button" id="btnPageNum" disabled>1</button>
+<button class="btn btn-sm btn-outline-primary" type="button" id="btnNext">Next</button>
+<button class="btn btn-sm btn-outline-primary" type="button" id="btnLast">Last</button>
+</div></div>
+<div id="emptyState" class="text-center py-5 text-muted" style="display:none;">
+<i class="bi bi-inbox fs-1"></i>
+<p class="mt-2">Koi data nahi. Database se load karein ya Excel import karein.</p>
+<button class="btn btn-primary btn-lg me-2" type="button" id="btnEmptyLoad"><i class="bi bi-cloud-download"></i> Load Data</button>
+<button class="btn btn-outline-primary btn-lg" type="button" id="btnEmptyImport">Import Excel</button>
+</div></div>
+<div class="modal fade" id="loadDataModal" tabindex="-1" data-bs-backdrop="static">
+<div class="modal-dialog modal-dialog-centered"><div class="modal-content border-0 shadow-lg">
+<div class="modal-header bg-primary text-white"><h5 class="modal-title"><i class="bi bi-cloud-download me-2"></i>Load Voter Data</h5></div>
+<div class="modal-body text-center py-4">
+<p class="mb-1 fs-5">Database se voter data load karein</p>
+<p class="text-muted small mb-4">Firebase Realtime Database</p>
+<button class="btn btn-primary btn-lg px-5" type="button" id="btnModalLoad"><i class="bi bi-cloud-download me-2"></i>Load Data</button>
+<div class="mt-3"><button class="btn btn-link text-secondary" type="button" id="btnModalImport">ya Excel Import karein</button></div>
+</div></div></div></div>
+<div class="modal fade" id="importModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+<div class="modal-header"><h5 class="modal-title">Import Voter Data</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+<div class="modal-body"><input type="file" id="fileInput" class="form-control" accept=".xlsx,.xls,.csv" />
+<div class="form-check mt-2"><input class="form-check-input" type="checkbox" id="mergeImport" checked /><label class="form-check-label" for="mergeImport">Merge with existing</label></div></div>
+<div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+<button type="button" class="btn btn-primary" id="btnDoImport">Import</button></div>
+</div></div></div>
+<div class="modal fade" id="detailModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+<div class="modal-header"><h5 class="modal-title" id="detailTitle">Voter</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+<div class="modal-body" id="detailBody"></div>
+<div class="modal-footer"><button type="button" class="btn btn-danger btn-sm" id="btnDeleteVoter">Delete</button>
+<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+<button type="button" class="btn btn-primary" id="btnSaveVoter">Save</button></div>
+</div></div></div>
+<div class="modal fade" id="analysisModal" tabindex="-1"><div class="modal-dialog modal-xl"><div class="modal-content">
+<div class="modal-header bg-dark text-white"><h5 class="modal-title">Complete Data Analysis</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+<div class="modal-body" id="analysisBody" style="max-height:80vh;overflow-y:auto;"></div>
+<div class="modal-footer"><button type="button" class="btn btn-secondary btn-sm" id="btnPrintAnalysis"><i class="bi bi-printer"></i> Print</button>
+<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+</div></div></div>
+<div class="modal fade" id="boothModal" tabindex="-1"><div class="modal-dialog modal-xl"><div class="modal-content">
+<div class="modal-header"><h5 class="modal-title" id="boothModalTitle">Summary</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+<div class="modal-body" id="boothBody" style="max-height:75vh;overflow-y:auto;"></div>
+</div></div></div>
+<div class="modal fade" id="ageListModal" tabindex="-1"><div class="modal-dialog modal-xl"><div class="modal-content">
+<div class="modal-header"><h5 class="modal-title">Age Group List</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+<div class="modal-body" id="ageListBody" style="max-height:75vh;overflow-y:auto;"></div>
+<div class="modal-footer"><button type="button" class="btn btn-secondary btn-sm" id="btnPrintAge"><i class="bi bi-printer"></i> Print</button>
+<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+</div></div></div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var FB_URL = "https://voter-c464f-default-rtdb.firebaseio.com";
+  var PAGE_SIZE = 100;
+  var voters = [];
+  var filtered = [];
+  var currentPage = 1;
+  var viewMode = "card";
+  var selectedIds = {};
+  var currentVoterId = null;
+  var lastAgeList = [];
+  var lastAgeLabel = "";
+  var db = null;
+  var firebaseReady = false;
+  var searchTimer = null;
+
+  try {
+    if (!firebase.apps.length) {
+      firebase.initializeApp({ databaseURL: FB_URL + "/" });
+    }
+    db = firebase.database();
+    firebaseReady = true;
+  } catch (e) {
+    console.warn("Firebase init", e);
+  }
+
+
+  var saveTimer = null;
+  var autoSaveEnabled = true;
+
+  function safeModalShow(id) {
+    try {
+      // remove leftover backdrops that block clicks
+      document.querySelectorAll(".modal-backdrop").forEach(function (el) { el.remove(); });
+      document.body.classList.remove("modal-open");
+      document.body.style.removeProperty("overflow");
+      document.body.style.removeProperty("padding-right");
+      var el = document.getElementById(id);
+      if (!el) return;
+      var inst = bootstrap.Modal.getInstance(el);
+      if (!inst) inst = new bootstrap.Modal(el);
+      inst.show();
+    } catch (e) { console.warn("modal show", e); }
+  }
+
+  function safeModalHide(id) {
+    try {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var inst = bootstrap.Modal.getInstance(el);
+      if (inst) inst.hide();
+      setTimeout(function () {
+        document.querySelectorAll(".modal-backdrop").forEach(function (b) { b.remove(); });
+        document.body.classList.remove("modal-open");
+        document.body.style.removeProperty("overflow");
+        document.body.style.removeProperty("padding-right");
+      }, 200);
+    } catch (e) { console.warn("modal hide", e); }
+  }
+
+  function scheduleAutoSave() {
+    if (!autoSaveEnabled || !voters.length) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () { autoSaveToFirebase(); }, 1200);
+  }
+
+  async function autoSaveToFirebase() {
+    if (!voters.length) return;
+    try {
+      var obj = {};
+      voters.forEach(function (v) {
+        var clean = {};
+        Object.keys(v).forEach(function (k) { if (v[k] !== undefined) clean[k] = v[k]; });
+        obj[String(v.id)] = clean;
+      });
+      var ok = false;
+      if (firebaseReady && db) {
+        try {
+          await db.ref("voters").set(obj);
+          await db.ref("meta").set({ count: voters.length, updatedAt: new Date().toISOString() });
+          ok = true;
+        } catch (e) { console.warn(e); }
+      }
+      if (!ok) {
+        var res = await fetch(FB_URL + "/voters.json", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+      }
+      var badge = document.getElementById("saveStatus");
+      if (badge) {
+        badge.textContent = "Saved " + new Date().toLocaleTimeString();
+        badge.className = "badge bg-success";
+      }
+    } catch (e) {
+      console.error("auto-save failed", e);
+      var badge2 = document.getElementById("saveStatus");
+      if (badge2) {
+        badge2.textContent = "Save failed";
+        badge2.className = "badge bg-danger";
+      }
+    }
+  }
+
+
+  function showLoading(msg) {
+    document.getElementById("loadingText").textContent = msg || "Loading...";
+    document.getElementById("loadingOverlay").style.display = "flex";
+  }
+  function hideLoading() {
+    document.getElementById("loadingOverlay").style.display = "none";
+  }
+
+  function familyKey(v) {
+    return String(v.grampanchayat || "").trim().toLowerCase() + "|" + String(v.ward_no || "").trim() + "|" + String(v.house_no || "").trim().toLowerCase();
+  }
+
+  function getFamilies() {
+    var map = {};
+    voters.forEach(function (v) {
+      var k = familyKey(v);
+      if (!map[k]) map[k] = [];
+      map[k].push(v);
+    });
+    return map;
+  }
+
+  function normalizeVoter(raw) {
+    var v = Object.assign({}, raw);
+    if (!v.id) v.id = v.card_no || ("gen_" + Math.random().toString(36).slice(2, 10));
+    v.id = String(v.id);
+    if (v.preference === undefined || v.preference === null || v.preference === "") v.preference = "undecided";
+    ["contacted", "voted", "slip_given", "symbol_made", "migrated", "old_age", "survey_done"].forEach(function (f) {
+      if (v[f] === undefined || v[f] === null) v[f] = false;
+    });
+    ["religion", "caste", "leader", "notes", "phone"].forEach(function (f) {
+      if (v[f] === undefined || v[f] === null) v[f] = "";
+    });
+    if (Number(v.age) >= 60) v.old_age = true;
+    return v;
+  }
+
+  function sortVoters(arr) {
+    arr.sort(function (a, b) {
+      var wa = Number(a.ward_no) || 0, wb = Number(b.ward_no) || 0;
+      if (wa !== wb) return wa - wb;
+      var sa = Number(a.serial_no) || Number(a.serial_no_2) || 0;
+      var sb = Number(b.serial_no) || Number(b.serial_no_2) || 0;
+      if (sa !== sb) return sa - sb;
+      return String(a.house_no || "").localeCompare(String(b.house_no || ""), undefined, { numeric: true });
+    });
+    return arr;
+  }
+
+  function isMale(v) {
+    var g = String(v.gender || "").toUpperCase();
+    return g === "M" || g === "MALE";
+  }
+  function isFemale(v) {
+    var g = String(v.gender || "").toUpperCase();
+    return g === "F" || g === "FEMALE";
+  }
+
+  async function saveToFirebase() {
+    if (!voters.length) { alert("Pehle data import karein"); return; }
+    showLoading("Saving " + voters.length + " voters...");
+    try {
+      var obj = {};
+      voters.forEach(function (v) {
+        var clean = {};
+        Object.keys(v).forEach(function (k) { if (v[k] !== undefined) clean[k] = v[k]; });
+        obj[String(v.id)] = clean;
+      });
+      var saved = false;
+      if (firebaseReady && db) {
+        try {
+          await db.ref("voters").set(obj);
+          await db.ref("meta").set({ count: voters.length, updatedAt: new Date().toISOString() });
+          saved = true;
+        } catch (e) { console.warn(e); }
+      }
+      if (!saved) {
+        var res = await fetch(FB_URL + "/voters.json", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+      }
+      hideLoading();
+      alert("Saved " + voters.length + " voters to Firebase");
+    } catch (e) {
+      hideLoading();
+      alert("Save failed: " + (e.message || e));
+    }
+  }
+
+  async function loadFromFirebase() {
+    showLoading("Loading from database...");
+    try {
+      var data = null;
+      if (firebaseReady && db) {
+        try {
+          var snap = await Promise.race([
+            db.ref("voters").once("value"),
+            new Promise(function (_, rej) { setTimeout(function () { rej(new Error("timeout")); }, 10000); })
+          ]);
+          data = snap.val();
+        } catch (e) { console.warn(e); }
+      }
+      if (data === null) {
+        var res = await fetch(FB_URL + "/voters.json");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        data = await res.json();
+      }
+      if (!data) {
+        hideLoading();
+        alert("Database empty. Import Excel then Save.");
+        showEmpty();
+        return;
+      }
+      var list = Array.isArray(data) ? data.filter(Boolean) : Object.keys(data).map(function (k) { return data[k]; });
+      if (!list.length) {
+        hideLoading();
+        alert("Database empty.");
+        showEmpty();
+        return;
+      }
+      voters = sortVoters(list.map(normalizeVoter));
+      currentPage = 1;
+      hideLoading();
+      hideLoadModal();
+      refreshUI();
+      if (!window._silentLoad) {
+        alert(voters.length + " voters loaded (Ward then Sr No order)");
+      }
+      window._silentLoad = false;
+    } catch (e) {
+      hideLoading();
+      alert("Load failed: " + (e.message || e));
+      showEmpty();
+    }
+  }
+
+  function hideLoadModal() {
+    safeModalHide("loadDataModal");
+  }
+
+  function showEmpty() {
+    document.getElementById("emptyState").style.display = "block";
+    document.getElementById("resultsArea").innerHTML = "";
+    document.getElementById("paginationBar").style.setProperty("display", "none", "important");
+  }
+
+  function handleImport() {
+    var file = document.getElementById("fileInput").files[0];
+    if (!file) { alert("Select a file"); return; }
+    var merge = document.getElementById("mergeImport").checked;
+    showLoading("Reading Excel...");
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        var wb = XLSX.read(new Uint8Array(e.target.result), { type: "array" });
+        var rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+        var imported = rows.map(function (r) {
+          return normalizeVoter({
+            id: r.id || r.ID || "",
+            grampanchayat: r.grampanchayat || r.GramPanchayat || "",
+            ward_no: r.ward_no || r.Ward || r.ward || "",
+            serial_no: r.serial_no || r.Serial || r.sr_no || "",
+            name: r.name || r.Name || "",
+            name_en: r.name_en || "",
+            name_hi: r.name_hi || "",
+            relative_name: r.relative_name || r.father_name || "",
+            relative_name_en: r.relative_name_en || "",
+            age: r.age || r.Age || "",
+            card_no: r.card_no || r.EPIC || "",
+            gender: r.gender || r.Gender || "",
+            house_no: r.house_no || r.House || r.makan || "",
+            address: r.address || r.Address || "",
+            polling_station_no: r.polling_station_no || r.PS || "",
+            booth_address: r.booth_address || "",
+            ac_no: r.ac_no || "",
+            part_no: r.part_no || "",
+            serial_no_2: r.serial_no_2 || "",
+            district: r.district || "",
+            local_body: r.local_body || "",
+            preference: r.preference || "undecided",
+            contacted: r.contacted === true || r.contacted === "true" || r.contacted === 1,
+            voted: r.voted === true || r.voted === "true" || r.voted === 1,
+            slip_given: r.slip_given === true || r.slip_given === "Yes",
+            symbol_made: r.symbol_made === true || r.symbol_made === "Yes",
+            migrated: r.migrated === true || r.migrated === "Yes",
+            religion: r.religion || "",
+            caste: r.caste || "",
+            leader: r.leader || "",
+            notes: r.notes || "",
+            phone: r.phone || r.mobile || ""
+          });
+        });
+        if (merge && voters.length) {
+          var map = {};
+          voters.forEach(function (v) { map[v.id] = v; if (v.card_no) map[v.card_no] = v; });
+          imported.forEach(function (nv) {
+            var ex = map[nv.id] || map[nv.card_no];
+            if (ex) {
+              ["preference", "contacted", "voted", "slip_given", "symbol_made", "migrated", "notes", "phone", "religion", "caste", "leader"].forEach(function (f) {
+                if (ex[f] !== undefined && ex[f] !== "" && ex[f] !== false) nv[f] = ex[f];
+              });
+              Object.assign(ex, nv);
+            } else voters.push(nv);
+          });
+        } else {
+          voters = imported;
+        }
+        voters = sortVoters(voters);
+        currentPage = 1;
+        hideLoading();
+        safeModalHide("importModal");
+        hideLoadModal();
+        refreshUI();
+        alert("Imported. Total: " + voters.length);
+      } catch (err) {
+        hideLoading();
+        alert("Import error: " + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function exportExcel() {
+    if (!voters.length) { alert("No data"); return; }
+    var data = filtered.length ? filtered : voters;
+    var rows = data.map(function (v) {
+      return {
+        id: v.id, name: v.name, name_en: v.name_en, relative_name: v.relative_name, age: v.age, gender: v.gender,
+        card_no: v.card_no, house_no: v.house_no, address: v.address, ward_no: v.ward_no, serial_no: v.serial_no,
+        polling_station_no: v.polling_station_no, booth_address: v.booth_address, grampanchayat: v.grampanchayat,
+        preference: v.preference, contacted: v.contacted ? "Yes" : "No", voted: v.voted ? "Yes" : "No",
+        slip_given: v.slip_given ? "Yes" : "No", symbol_made: v.symbol_made ? "Yes" : "No",
+        migrated: v.migrated ? "Yes" : "No", phone: v.phone || "", notes: v.notes || ""
+      };
+    });
+    var ws = XLSX.utils.json_to_sheet(rows);
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Voters");
+    XLSX.writeFile(wb, "voters_export.xlsx");
+  }
+
+  function exportCSV() {
+    if (!voters.length) { alert("No data"); return; }
+    var data = filtered.length ? filtered : voters;
+    var headers = ["id", "name", "relative_name", "age", "gender", "card_no", "house_no", "ward_no", "serial_no", "polling_station_no", "preference", "contacted", "voted", "phone", "notes"];
+    var lines = [headers.join(",")];
+    data.forEach(function (v) {
+      lines.push(headers.map(function (h) {
+        var val = v[h];
+        if (typeof val === "boolean") val = val ? "Yes" : "No";
+        val = val == null ? "" : String(val);
+        if (val.indexOf(",") >= 0 || val.indexOf('"') >= 0) val = '"' + val.replace(/"/g, '""') + '"';
+        return val;
+      }).join(","));
+    });
+    var blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "voters_export.csv";
+    a.click();
+  }
+
+  function applyFilters() {
+    var q = (document.getElementById("searchInput").value || "").trim().toLowerCase();
+    var ward = document.getElementById("filterWard").value;
+    var pref = document.getElementById("filterPreference").value;
+    var status = document.getElementById("filterStatus").value;
+
+    filtered = voters.filter(function (v) {
+      if (q) {
+        var tokens = q.split(/\s+/).filter(Boolean);
+        var hay = [v.name, v.name_en, v.name_hi, v.relative_name, v.relative_name_en, v.card_no, v.house_no, v.address, String(v.serial_no || ""), String(v.serial_no_2 || "")].join(" ").toLowerCase();
+        if (!tokens.every(function (t) { return hay.indexOf(t) >= 0; })) return false;
+      }
+      if (ward && String(v.ward_no) !== ward) return false;
+      if (pref && v.preference !== pref) return false;
+      if (status === "contacted" && !v.contacted) return false;
+      if (status === "not_contacted" && v.contacted) return false;
+      if (status === "voted" && !v.voted) return false;
+      if (status === "slip" && !v.slip_given) return false;
+      if (status === "symbol" && !v.symbol_made) return false;
+      if (status === "old" && !(v.old_age || Number(v.age) >= 60)) return false;
+      if (status === "age80" && Number(v.age) < 80) return false;
+      if (status === "age18_30") { var a = Number(v.age); if (!(a >= 18 && a <= 30)) return false; }
+      if (status === "age31_45") { var a2 = Number(v.age); if (!(a2 >= 31 && a2 <= 45)) return false; }
+      if (status === "age46_59") { var a3 = Number(v.age); if (!(a3 >= 46 && a3 <= 59)) return false; }
+      if (status === "age60_79") { var a4 = Number(v.age); if (!(a4 >= 60 && a4 <= 79)) return false; }
+      if (status === "migrated" && !v.migrated) return false;
+      return true;
+    });
+
+    sortVoters(filtered);
+    var tp = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE) || 1);
+    if (currentPage > tp) currentPage = tp;
+    if (currentPage < 1) currentPage = 1;
+    renderResults();
+    updateStats();
+  }
+
+  function updateStats() {
+    document.getElementById("statTotal").textContent = voters.length;
+    document.getElementById("statMale").textContent = voters.filter(isMale).length;
+    document.getElementById("statFemale").textContent = voters.filter(isFemale).length;
+    document.getElementById("statOurs").textContent = voters.filter(function (v) { return v.preference === "ours"; }).length;
+    document.getElementById("statOther").textContent = voters.filter(function (v) { return v.preference === "other"; }).length;
+    document.getElementById("statFamilies").textContent = Object.keys(getFamilies()).length;
+    document.getElementById("resultCount").textContent = filtered.length + " results";
+  }
+
+  function refreshUI() {
+    var wards = [];
+    var seen = {};
+    voters.forEach(function (v) {
+      var w = String(v.ward_no || "");
+      if (w && !seen[w]) { seen[w] = true; wards.push(w); }
+    });
+    wards.sort(function (a, b) { return Number(a) - Number(b); });
+    var sel = document.getElementById("filterWard");
+    var cur = sel.value;
+    sel.innerHTML = '<option value="">Sabhi Ward</option>' + wards.map(function (w) {
+      return '<option value="' + w + '">Ward ' + w + "</option>";
+    }).join("");
+    sel.value = cur;
+    applyFilters();
+  }
+
+  function pageSlice() {
+    var start = (currentPage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }
+
+  function totalPages() {
+    return Math.max(1, Math.ceil(filtered.length / PAGE_SIZE) || 1);
+  }
+
+  function renderResults() {
+    var area = document.getElementById("resultsArea");
+    var empty = document.getElementById("emptyState");
+    var pag = document.getElementById("paginationBar");
+
+    if (!voters.length) {
+      area.innerHTML = "";
+      empty.style.display = "block";
+      pag.style.setProperty("display", "none", "important");
+      return;
+    }
+    empty.style.display = "none";
+
+    var pageData = pageSlice();
+    if (viewMode === "table") {
+      area.innerHTML = renderTable(pageData);
+    } else {
+      area.innerHTML = pageData.map(renderCard).join("");
+    }
+
+    var tp = totalPages();
+    pag.style.setProperty("display", "flex", "important");
+    document.getElementById("pageInfo").textContent = "Page " + currentPage + " of " + tp + " | Showing " + pageData.length + " of " + filtered.length;
+    document.getElementById("btnPageNum").textContent = String(currentPage);
+    document.getElementById("btnFirst").disabled = currentPage <= 1;
+    document.getElementById("btnPrev").disabled = currentPage <= 1;
+    document.getElementById("btnNext").disabled = currentPage >= tp;
+    document.getElementById("btnLast").disabled = currentPage >= tp;
+  }
+
+  function renderCard(v) {
+    var fam = getFamilies()[familyKey(v)] || [v];
+    var chips = "";
+    if (v.contacted) chips += '<span class="status-chip chip-contacted">Contacted</span>';
+    if (v.voted) chips += '<span class="status-chip chip-voted">Voted</span>';
+    if (v.slip_given) chips += '<span class="status-chip chip-slip">Slip</span>';
+    if (v.symbol_made) chips += '<span class="status-chip chip-symbol">Symbol</span>';
+    if (v.old_age || Number(v.age) >= 60) chips += '<span class="status-chip chip-old">60+</span>';
+    var checked = selectedIds[v.id] ? " checked" : "";
+    var sr = v.serial_no || v.serial_no_2 || "-";
+    return '<div class="voter-card ' + (v.preference || "undecided") + ' p-3">' +
+      '<div class="d-flex align-items-start gap-2">' +
+      '<div class="form-check mt-1"><input class="form-check-input sel-check" type="checkbox" value="' + v.id + '"' + checked + " style=\"width:1.25rem;height:1.25rem\" /></div>" +
+      '<div class="flex-grow-1 open-family" data-id="' + v.id + '" style="cursor:pointer;min-width:0;">' +
+      '<div class="d-flex flex-wrap align-items-center gap-2 mb-1">' +
+      '<span class="badge bg-primary fs-6">Sr ' + sr + '</span>' +
+      '<span class="ward-pill">Ward ' + (v.ward_no || "?") + '</span>' +
+      '<span class="house-pill">House ' + esc(v.house_no || "?") + '</span>' +
+      (fam.length > 1 ? '<span class="badge bg-info">' + fam.length + ' Family</span>' : '') +
+      '</div>' +
+      '<div class="fw-bold fs-5 text-dark voter-name">' + esc(v.name || v.name_en || "-") + '</div>' +
+      (v.name_en ? '<div class="small text-muted">' + esc(v.name_en) + '</div>' : '') +
+      '<div class="small text-muted mt-1">Father: ' + esc(v.relative_name || "-") + ' · Age ' + (v.age || "-") + ' · ' + (v.gender || "") + '</div>' +
+      '<div class="mt-1">' + chips + '</div>' +
+      (fam.length > 1 ? '<div class="small text-primary mt-1"><i class="bi bi-people"></i> Tap name for full family</div>' : '') +
+      '</div>' +
+      '<button class="btn btn-sm btn-outline-primary open-detail flex-shrink-0" data-id="' + v.id + '" type="button" style="min-width:44px;min-height:44px"><i class="bi bi-pencil"></i></button>' +
+      '</div></div>';
+  }
+
+  function renderTable(list) {
+    var rows = list.map(function (v) {
+      var fam = getFamilies()[familyKey(v)] || [v];
+      var st = (v.contacted ? "C " : "") + (v.voted ? "V " : "") + (v.slip_given ? "S " : "");
+      return "<tr><td><input type='checkbox' class='sel-check' value='" + v.id + "'" + (selectedIds[v.id] ? " checked" : "") + " /></td>" +
+        "<td class='open-family' data-id='" + v.id + "' style='cursor:pointer;color:#0d6efd;font-weight:600'>" + esc(v.name || v.name_en) + "</td><td>" + esc(v.relative_name || "") + "</td><td>" + (v.age || "") + "</td><td>" + (v.gender || "") + "</td>" +
+        "<td><strong>" + (v.ward_no || "") + "</strong></td><td>" + esc(v.house_no || "") + "</td><td><strong>" + (v.serial_no || "") + "</strong></td><td>" + fam.length + "</td>" +
+        "<td><span class='badge " + (v.preference === "ours" ? "bg-success" : v.preference === "other" ? "bg-danger" : "bg-secondary") + "'>" + (v.preference || "?") + "</span></td>" +
+        "<td>" + st + "</td><td><button type='button' class='btn btn-xs btn-outline-primary open-detail' data-id='" + v.id + "'>Edit</button></td></tr>";
+    }).join("");
+    return '<div class="table-responsive bg-white rounded shadow-sm"><table class="table table-sm table-hover mb-0">' +
+      "<thead class='table-light'><tr><th></th><th>Name</th><th>Father</th><th>Age</th><th>Sex</th><th>Ward</th><th>House</th><th>Sr</th><th>Fam</th><th>Pref</th><th>St</th><th></th></tr></thead>" +
+      "<tbody>" + rows + "</tbody></table></div>";
+  }
+
+  function esc(s) {
+    if (s == null) return "";
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+
+  function showFamilyByVoterId(id) {
+    var v = voters.find(function (x) { return x.id === id; });
+    if (!v) return;
+    var fam = getFamilies()[familyKey(v)] || [v];
+    sortVoters(fam);
+    var rows = fam.map(function (m, i) {
+      var sr = m.serial_no || m.serial_no_2 || "-";
+      var prefBadge = m.preference === "ours" ? "bg-success" : m.preference === "other" ? "bg-danger" : "bg-secondary";
+      var st = (m.contacted ? "Contacted " : "") + (m.voted ? "Voted " : "") + (m.slip_given ? "Slip " : "");
+      return '<div class="family-row p-3 mb-2 rounded border ' + (m.preference || "undecided") + '" style="background:#fff">' +
+        '<div class="d-flex justify-content-between align-items-start gap-2">' +
+        '<div style="min-width:0">' +
+        '<div class="d-flex flex-wrap gap-2 mb-1">' +
+        '<span class="badge bg-primary">Sr ' + sr + '</span>' +
+        '<span class="ward-pill">Ward ' + (m.ward_no || "?") + '</span>' +
+        '<span class="badge ' + prefBadge + '">' + (m.preference || "?") + '</span>' +
+        '</div>' +
+        '<div class="fw-bold fs-5">' + esc(m.name || m.name_en || "-") + '</div>' +
+        '<div class="small text-muted">Father: ' + esc(m.relative_name || "-") + ' · Age ' + (m.age || "-") + ' · ' + (m.gender || "") + '</div>' +
+        (st ? '<div class="small mt-1">' + st + '</div>' : '') +
+        '</div>' +
+        '<button type="button" class="btn btn-sm btn-outline-primary open-detail" data-id="' + m.id + '" style="min-width:44px;min-height:44px"><i class="bi bi-pencil"></i></button>' +
+        '</div></div>';
+    }).join("");
+    document.getElementById("boothModalTitle").textContent = "Family — House " + (v.house_no || "?") + " · Ward " + (v.ward_no || "?");
+    document.getElementById("boothBody").innerHTML =
+      '<div class="mb-2 small text-muted">' + esc(v.address || "") + ' · ' + esc(v.grampanchayat || "") +
+      ' · <strong>' + fam.length + ' members</strong></div>' + rows +
+      '<div class="mt-3 d-flex flex-wrap gap-2">' +
+      '<button type="button" class="btn btn-success btn-sm fam-bulk" data-key="' + familyKey(v).replace(/"/g, "") + '" data-field="preference" data-val="ours">All Ours</button>' +
+      '<button type="button" class="btn btn-danger btn-sm fam-bulk" data-key="' + familyKey(v).replace(/"/g, "") + '" data-field="preference" data-val="other">All Other</button>' +
+      '<button type="button" class="btn btn-primary btn-sm fam-bulk" data-key="' + familyKey(v).replace(/"/g, "") + '" data-field="contacted" data-val="true">All Contacted</button>' +
+      '<button type="button" class="btn btn-warning btn-sm fam-bulk" data-key="' + familyKey(v).replace(/"/g, "") + '" data-field="slip_given" data-val="true">All Slip</button>' +
+      '</div>';
+    // store key for bulk - use data on buttons via familyKey from first member
+    window._famKey = familyKey(v);
+    safeModalShow("boothModal");
+  }
+
+  function familyBulkAction(field, value) {
+    var key = window._famKey;
+    if (!key) return;
+    var fam = getFamilies()[key] || [];
+    fam.forEach(function (m) {
+      if (value === "true") m[field] = true;
+      else m[field] = value;
+    });
+    showFamilyByVoterId(fam[0].id);
+    applyFilters();
+    scheduleAutoSave();
+  }
+
+  function openDetail(id) {
+    currentVoterId = id;
+    var v = voters.find(function (x) { return x.id === id; });
+    if (!v) return;
+    document.getElementById("detailTitle").textContent = v.name || v.name_en || "Voter";
+    var fam = getFamilies()[familyKey(v)] || [v];
+    var famHtml = "";
+    if (fam.length > 1) {
+      famHtml = "<hr /><strong>Family (" + fam.length + ")</strong>";
+      fam.forEach(function (m) {
+        famHtml += '<div class="d-flex justify-content-between border-bottom py-1"><div><strong>' + esc(m.name || m.name_en) + "</strong> " +
+          '<span class="small text-muted">' + esc(m.relative_name || "") + " · " + (m.age || "") + "</span></div>" +
+          '<button type="button" class="btn btn-xs btn-outline-primary open-detail" data-id="' + m.id + '">Open</button></div>';
+      });
+    }
+    document.getElementById("detailBody").innerHTML =
+      '<div class="row g-2">' +
+      field("Name", "d_name", v.name) + field("Name EN", "d_name_en", v.name_en) +
+      field("Father/Relative", "d_relative", v.relative_name) +
+      '<div class="col-md-3"><label class="form-label small">Age</label><input type="number" class="form-control form-control-sm" id="d_age" value="' + esc(v.age) + '" /></div>' +
+      '<div class="col-md-3"><label class="form-label small">Gender</label><select class="form-select form-select-sm" id="d_gender">' +
+      opt("M", v.gender) + opt("F", v.gender) + opt("O", v.gender) + "</select></div>" +
+      field("Ward", "d_ward", v.ward_no) + field("House", "d_house", v.house_no) +
+      field("Sr No", "d_serial", v.serial_no) + field("Card", "d_card", v.card_no) + field("Phone", "d_phone", v.phone) +
+      '<div class="col-md-4"><label class="form-label small">Preference</label><select class="form-select form-select-sm" id="d_preference">' +
+      '<option value="undecided"' + (v.preference === "undecided" ? " selected" : "") + ">Anirnit</option>" +
+      '<option value="ours"' + (v.preference === "ours" ? " selected" : "") + ">Hamare</option>" +
+      '<option value="other"' + (v.preference === "other" ? " selected" : "") + ">Doosre</option></select></div>" +
+      field("Religion", "d_religion", v.religion) + field("Caste", "d_caste", v.caste) +
+      field("Leader", "d_leader", v.leader) + field("Notes", "d_notes", v.notes) +
+      '<div class="col-12 d-flex flex-wrap gap-3 mt-2">' +
+      sw("d_contacted", "Contacted", v.contacted) + sw("d_voted", "Voted", v.voted) +
+      sw("d_slip", "Slip Given", v.slip_given) + sw("d_symbol", "Symbol", v.symbol_made) +
+      sw("d_migrated", "Migrated", v.migrated) + sw("d_old", "Old Age", v.old_age || Number(v.age) >= 60) +
+      "</div>" + famHtml + "</div>";
+    safeModalShow("detailModal");
+  }
+
+  function field(label, id, val) {
+    return '<div class="col-md-6"><label class="form-label small">' + label + '</label><input class="form-control form-control-sm" id="' + id + '" value="' + esc(val) + '" /></div>';
+  }
+  function opt(val, cur) {
+    return '<option value="' + val + '"' + (cur === val ? " selected" : "") + ">" + val + "</option>";
+  }
+  function sw(id, label, checked) {
+    return '<div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="' + id + '"' + (checked ? " checked" : "") + ' /><label class="form-check-label" for="' + id + '">' + label + "</label></div>";
+  }
+
+  function saveVoterDetail() {
+    var v = voters.find(function (x) { return x.id === currentVoterId; });
+    if (!v) return;
+    v.name = document.getElementById("d_name").value;
+    v.name_en = document.getElementById("d_name_en").value;
+    v.relative_name = document.getElementById("d_relative").value;
+    v.age = document.getElementById("d_age").value;
+    v.gender = document.getElementById("d_gender").value;
+    v.ward_no = document.getElementById("d_ward").value;
+    v.house_no = document.getElementById("d_house").value;
+    v.serial_no = document.getElementById("d_serial").value;
+    v.card_no = document.getElementById("d_card").value;
+    v.phone = document.getElementById("d_phone").value;
+    v.preference = document.getElementById("d_preference").value;
+    v.religion = document.getElementById("d_religion").value;
+    v.caste = document.getElementById("d_caste").value;
+    v.leader = document.getElementById("d_leader").value;
+    v.notes = document.getElementById("d_notes").value;
+    v.contacted = document.getElementById("d_contacted").checked;
+    v.voted = document.getElementById("d_voted").checked;
+    v.slip_given = document.getElementById("d_slip").checked;
+    v.symbol_made = document.getElementById("d_symbol").checked;
+    v.migrated = document.getElementById("d_migrated").checked;
+    v.old_age = document.getElementById("d_old").checked;
+    safeModalHide("detailModal");
+    applyFilters();
+    scheduleAutoSave();
+  }
+
+  function deleteCurrentVoter() {
+    if (!confirm("Delete this voter?")) return;
+    voters = voters.filter(function (x) { return x.id !== currentVoterId; });
+    safeModalHide("detailModal");
+    applyFilters();
+    scheduleAutoSave();
+  }
+
+  function showFullAnalysis() {
+    if (!voters.length) { alert("Pehle data load karein"); return; }
+    var total = voters.length;
+    var male = voters.filter(isMale).length;
+    var female = voters.filter(isFemale).length;
+    var famCount = Object.keys(getFamilies()).length;
+    var ours = voters.filter(function (v) { return v.preference === "ours"; }).length;
+    var other = voters.filter(function (v) { return v.preference === "other"; }).length;
+    var undecided = total - ours - other;
+    var contacted = voters.filter(function (v) { return v.contacted; }).length;
+    var voted = voters.filter(function (v) { return v.voted; }).length;
+    var slip = voters.filter(function (v) { return v.slip_given; }).length;
+    var symbol = voters.filter(function (v) { return v.symbol_made; }).length;
+    var migrated = voters.filter(function (v) { return v.migrated; }).length;
+    var old60 = voters.filter(function (v) { return v.old_age || Number(v.age) >= 60; }).length;
+    var a18 = voters.filter(function (v) { var a = Number(v.age); return a >= 18 && a <= 30; }).length;
+    var a31 = voters.filter(function (v) { var a = Number(v.age); return a >= 31 && a <= 45; }).length;
+    var a46 = voters.filter(function (v) { var a = Number(v.age); return a >= 46 && a <= 59; }).length;
+    var a60 = voters.filter(function (v) { var a = Number(v.age); return a >= 60 && a <= 79; }).length;
+    var a80 = voters.filter(function (v) { return Number(v.age) >= 80; }).length;
+    function pct(n) { return total ? (Math.round(n / total * 1000) / 10) + "%" : "0%"; }
+
+    var byWard = {};
+    voters.forEach(function (v) {
+      var w = String(v.ward_no || "?");
+      if (!byWard[w]) byWard[w] = { total: 0, male: 0, female: 0, families: {} };
+      byWard[w].total++;
+      if (isMale(v)) byWard[w].male++;
+      if (isFemale(v)) byWard[w].female++;
+      byWard[w].families[familyKey(v)] = 1;
+    });
+    var wardKeys = Object.keys(byWard).sort(function (a, b) { return Number(a) - Number(b); });
+    var wardRows = wardKeys.map(function (w) {
+      var b = byWard[w];
+      return "<tr><td><strong>Ward " + w + "</strong></td><td>" + b.total + "</td><td>" + b.male + "</td><td>" + b.female + "</td><td>" + Object.keys(b.families).length + "</td></tr>";
+    }).join("");
+
+    var byBooth = {};
+    voters.forEach(function (v) {
+      var b = String(v.polling_station_no || "?");
+      if (!byBooth[b]) byBooth[b] = { total: 0, male: 0, female: 0, wards: {}, addresses: {}, booth_address: v.booth_address || "" };
+      byBooth[b].total++;
+      if (isMale(v)) byBooth[b].male++;
+      if (isFemale(v)) byBooth[b].female++;
+      if (v.ward_no) byBooth[b].wards[String(v.ward_no)] = 1;
+      if (v.address) byBooth[b].addresses[String(v.address).trim()] = 1;
+      if (v.booth_address) byBooth[b].booth_address = v.booth_address;
+    });
+    var boothKeys = Object.keys(byBooth).sort(function (a, b) { return Number(a) - Number(b); });
+    var boothRows = boothKeys.map(function (bn) {
+      var b = byBooth[bn];
+      var ws = Object.keys(b.wards).sort(function (a, c) { return Number(a) - Number(c); }).join(", ");
+      return "<tr><td><strong>" + bn + "</strong></td><td>" + esc(b.booth_address) + "</td><td>" + b.total + "</td><td>" + b.male + "</td><td>" + b.female + "</td><td>" + ws + "</td><td>" + Object.keys(b.addresses).length + "</td></tr>";
+    }).join("");
+
+    document.getElementById("analysisBody").innerHTML =
+      "<h5>GP Overview</h5><div class='row g-2 mb-3'>" +
+      cardStat(total, "Total") + cardStat(male, "Male") + cardStat(female, "Female") + cardStat(famCount, "Families") +
+      "</div><div class='row g-3 mb-3'><div class='col-md-6'><div class='card'><div class='card-header'>Age Group</div><div class='card-body p-0'>" +
+      "<table class='table table-sm mb-0'><tr><td>18-30</td><td class='text-end'>" + a18 + "</td><td>" + pct(a18) + "</td></tr>" +
+      "<tr><td>31-45</td><td class='text-end'>" + a31 + "</td><td>" + pct(a31) + "</td></tr>" +
+      "<tr><td>46-59</td><td class='text-end'>" + a46 + "</td><td>" + pct(a46) + "</td></tr>" +
+      "<tr><td>60-79</td><td class='text-end'>" + a60 + "</td><td>" + pct(a60) + "</td></tr>" +
+      "<tr><td>80+</td><td class='text-end'>" + a80 + "</td><td>" + pct(a80) + "</td></tr>" +
+      "<tr><td><strong>60+ total</strong></td><td class='text-end'>" + old60 + "</td><td>" + pct(old60) + "</td></tr></table></div></div></div>" +
+      "<div class='col-md-6'><div class='card'><div class='card-header'>Status</div><div class='card-body p-0'>" +
+      "<table class='table table-sm mb-0'><tr><td>Hamare</td><td class='text-end text-success'>" + ours + "</td><td>" + pct(ours) + "</td></tr>" +
+      "<tr><td>Doosre</td><td class='text-end text-danger'>" + other + "</td><td>" + pct(other) + "</td></tr>" +
+      "<tr><td>Anirnit</td><td class='text-end'>" + undecided + "</td><td>" + pct(undecided) + "</td></tr>" +
+      "<tr><td>Contacted</td><td class='text-end'>" + contacted + "</td><td>" + pct(contacted) + "</td></tr>" +
+      "<tr><td>Voted</td><td class='text-end'>" + voted + "</td><td>" + pct(voted) + "</td></tr>" +
+      "<tr><td>Slip</td><td class='text-end'>" + slip + "</td><td>" + pct(slip) + "</td></tr>" +
+      "<tr><td>Symbol</td><td class='text-end'>" + symbol + "</td><td>" + pct(symbol) + "</td></tr>" +
+      "<tr><td>Migrated</td><td class='text-end'>" + migrated + "</td><td>" + pct(migrated) + "</td></tr></table></div></div></div></div>" +
+      "<h5>Ward-wise</h5><div class='table-responsive mb-3'><table class='table table-sm table-bordered'><thead class='table-dark'><tr><th>Ward</th><th>Total</th><th>Male</th><th>Female</th><th>Families</th></tr></thead><tbody>" +
+      wardRows + "</tbody></table></div>" +
+      "<h5>Booth-wise</h5><div class='table-responsive'><table class='table table-sm table-bordered'><thead class='table-dark'><tr><th>Booth</th><th>Address</th><th>Total</th><th>Male</th><th>Female</th><th>Wards</th><th>Addresses</th></tr></thead><tbody>" +
+      boothRows + "</tbody></table></div>";
+
+    safeModalShow("analysisModal");
+  }
+
+  function cardStat(n, label) {
+    return '<div class="col-6 col-md-3"><div class="card text-center p-2"><div class="fs-4 fw-bold">' + n + '</div><div class="small text-muted">' + label + "</div></div></div>";
+  }
+
+  function showBoothSummary() {
+    if (!voters.length) { alert("Pehle data load karein"); return; }
+    var byBooth = {};
+    voters.forEach(function (v) {
+      var booth = String(v.polling_station_no || "Unknown");
+      if (!byBooth[booth]) byBooth[booth] = { total: 0, male: 0, female: 0, addresses: {}, wards: {}, booth_address: v.booth_address || "", ours: 0, other: 0, contacted: 0 };
+      var b = byBooth[booth];
+      b.total++;
+      if (isMale(v)) b.male++;
+      if (isFemale(v)) b.female++;
+      if (v.address) b.addresses[String(v.address).trim()] = 1;
+      if (v.ward_no) b.wards[String(v.ward_no)] = 1;
+      if (v.booth_address) b.booth_address = v.booth_address;
+      if (v.preference === "ours") b.ours++;
+      else if (v.preference === "other") b.other++;
+      if (v.contacted) b.contacted++;
+    });
+    var booths = Object.keys(byBooth).sort(function (a, b) { return Number(a) - Number(b); });
+    var cards = booths.map(function (bn) {
+      var b = byBooth[bn];
+      var addrList = Object.keys(b.addresses).sort();
+      var addrHtml = addrList.map(function (a) {
+        return "<li class='mb-1'><strong>" + esc(a) + "</strong></li>";
+      }).join("");
+      var ws = Object.keys(b.wards).sort(function (a, c) { return Number(a) - Number(c); }).map(function (w) {
+        return '<span class="badge bg-primary me-1">W' + w + "</span>";
+      }).join(" ");
+      return '<div class="card mb-3"><div class="card-header bg-primary text-white d-flex flex-wrap justify-content-between gap-2">' +
+        "<div><strong>Booth " + bn + "</strong> — " + esc(b.booth_address) + "</div>" +
+        "<div>Total: " + b.total + " | M: " + b.male + " | F: " + b.female + " | Ours: " + b.ours + "</div></div>" +
+        '<div class="card-body"><div class="mb-2">Wards: ' + ws + "</div>" +
+        "<div class='fw-semibold mb-1'>Addresses under this booth (" + addrList.length + "):</div>" +
+        "<ul class='mb-0'>" + (addrHtml || "<li>No address</li>") + "</ul></div></div>";
+    }).join("");
+    document.getElementById("boothModalTitle").textContent = "Booth-wise Analysis";
+    document.getElementById("boothBody").innerHTML = cards || "<p>No data</p>";
+    safeModalShow("boothModal");
+  }
+
+  function showWardGender() {
+    if (!voters.length) { alert("Pehle data load karein"); return; }
+    var byWard = {};
+    voters.forEach(function (v) {
+      var w = String(v.ward_no || "Unknown");
+      if (!byWard[w]) byWard[w] = { total: 0, male: 0, female: 0, families: {}, ours: 0, other: 0, contacted: 0, voted: 0, old: 0 };
+      var b = byWard[w];
+      b.total++;
+      if (isMale(v)) b.male++;
+      if (isFemale(v)) b.female++;
+      b.families[familyKey(v)] = 1;
+      if (v.preference === "ours") b.ours++;
+      if (v.preference === "other") b.other++;
+      if (v.contacted) b.contacted++;
+      if (v.voted) b.voted++;
+      if (v.old_age || Number(v.age) >= 60) b.old++;
+    });
+    var wards = Object.keys(byWard).sort(function (a, b) { return Number(a) - Number(b); });
+    var rows = wards.map(function (w) {
+      var b = byWard[w];
+      return "<tr><td><strong>Ward " + w + "</strong></td><td>" + b.total + "</td><td class='text-primary'>" + b.male + "</td><td class='text-danger'>" + b.female +
+        "</td><td>" + Object.keys(b.families).length + "</td><td>" + b.old + "</td><td class='text-success'>" + b.ours + "</td><td class='text-danger'>" + b.other +
+        "</td><td>" + b.contacted + "</td><td>" + b.voted + "</td></tr>";
+    }).join("");
+    document.getElementById("boothModalTitle").textContent = "Ward Gender Analysis";
+    document.getElementById("boothBody").innerHTML =
+      "<p><strong>GP Total:</strong> " + voters.length + " | Male: " + voters.filter(isMale).length + " | Female: " + voters.filter(isFemale).length + "</p>" +
+      '<div class="table-responsive"><table class="table table-sm table-bordered"><thead class="table-dark"><tr><th>Ward</th><th>Total</th><th>Male</th><th>Female</th><th>Families</th><th>60+</th><th>Ours</th><th>Other</th><th>Contacted</th><th>Voted</th></tr></thead><tbody>' +
+      rows + "</tbody></table></div>";
+    safeModalShow("boothModal");
+  }
+
+  function showAgeList() {
+    if (!voters.length) { alert("Pehle data load karein"); return; }
+    var groups = [
+      { key: "18-30", min: 18, max: 30 },
+      { key: "31-45", min: 31, max: 45 },
+      { key: "46-59", min: 46, max: 59 },
+      { key: "60-79", min: 60, max: 79 },
+      { key: "80+", min: 80, max: 200 }
+    ];
+    var btns = groups.map(function (g) {
+      var cnt = voters.filter(function (v) { var a = Number(v.age); return a >= g.min && a <= g.max; }).length;
+      return '<button type="button" class="btn btn-sm btn-outline-primary age-grp-btn" data-key="' + g.key + '" data-min="' + g.min + '" data-max="' + g.max + '">' + g.key + ' <span class="badge bg-primary">' + cnt + "</span></button>";
+    }).join(" ");
+    document.getElementById("ageListBody").innerHTML = '<div class="mb-3">' + btns + '</div><div id="ageGroupTable"><p class="text-muted">Age group select karein</p></div>';
+    safeModalShow("ageListModal");
+  }
+
+  function renderAgeGroup(key, min, max) {
+    var list = voters.filter(function (v) { var a = Number(v.age); return a >= min && a <= max; });
+    sortVoters(list);
+    lastAgeList = list;
+    lastAgeLabel = key;
+    var rows = list.map(function (v, i) {
+      return "<tr><td>" + (i + 1) + "</td><td>" + (v.serial_no || "") + "</td><td>" + esc(v.name || v.name_en) + "</td><td>" + esc(v.relative_name || "") +
+        "</td><td>" + (v.age || "") + "</td><td>" + (v.gender || "") + "</td><td>" + (v.ward_no || "") + "</td><td>" + esc(v.house_no || "") +
+        "</td><td class='small'>" + esc(v.address || "") + "</td><td>" + (v.polling_station_no || "") + "</td></tr>";
+    }).join("");
+    document.getElementById("ageGroupTable").innerHTML =
+      "<strong>" + key + " — " + list.length + " voters</strong>" +
+      '<div class="table-responsive mt-2"><table class="table table-sm table-bordered"><thead class="table-dark"><tr><th>#</th><th>Sr</th><th>Name</th><th>Father</th><th>Age</th><th>Sex</th><th>Ward</th><th>House</th><th>Address</th><th>Booth</th></tr></thead><tbody>' +
+      (rows || "<tr><td colspan='10'>No voters</td></tr>") + "</tbody></table></div>";
+  }
+
+  function openPrintWindow(title, bodyHtml) {
+    var w = window.open("", "_blank", "width=1000,height=700");
+    if (!w) { alert("Popup blocked — browser me popup allow karein"); return; }
+    var doc = w.document;
+    doc.open();
+    doc.write("<!DOCTYPE html><html><head><meta charset='UTF-8'><title>" + title + "</title>");
+    doc.write("<style>body{font-family:Arial,sans-serif;font-size:11px;margin:12px;}h2{margin:0 0 6px;font-size:16px;}.meta{color:#555;margin-bottom:10px;}table{width:100%;border-collapse:collapse;}th,td{border:1px solid #333;padding:3px 5px;text-align:left;}th{background:#eee;}</style>");
+    doc.write("</head><body>");
+    doc.write(bodyHtml);
+    doc.write("</body></html>");
+    doc.close();
+    setTimeout(function () { try { w.focus(); w.print(); } catch (e) {} }, 400);
+  }
+
+  function printCurrentList() {
+    var list = (filtered.length ? filtered : voters).slice();
+    if (!list.length) { alert("Koi data nahi"); return; }
+    var mode = prompt("Print order chunein:\n1 = Ward + Sr No\n2 = Ward + Name A-Z\n3 = Name A-Z (sab)\n4 = Sr No only\n\nNumber likhein (1-4):", "1");
+    if (mode === null) return;
+    mode = String(mode).trim() || "1";
+    var title = "Voter List";
+    if (mode === "2") {
+      list.sort(function (a, b) {
+        var wa = Number(a.ward_no) || 0, wb = Number(b.ward_no) || 0;
+        if (wa !== wb) return wa - wb;
+        return String(a.name || a.name_en || "").localeCompare(String(b.name || b.name_en || ""), "hi", { sensitivity: "base" });
+      });
+      title = "Voter List (Ward + Name A-Z)";
+    } else if (mode === "3") {
+      list.sort(function (a, b) {
+        return String(a.name || a.name_en || "").localeCompare(String(b.name || b.name_en || ""), "hi", { sensitivity: "base" });
+      });
+      title = "Voter List (Name A-Z)";
+    } else if (mode === "4") {
+      list.sort(function (a, b) {
+        var sa = Number(a.serial_no) || Number(a.serial_no_2) || 0;
+        var sb = Number(b.serial_no) || Number(b.serial_no_2) || 0;
+        return sa - sb;
+      });
+      title = "Voter List (Sr No)";
+    } else {
+      sortVoters(list);
+      title = "Voter List (Ward + Sr No)";
+    }
+    var rows = "";
+    list.forEach(function (v, i) {
+      rows += "<tr><td>" + (i + 1) + "</td><td>" + (v.serial_no || v.serial_no_2 || "") + "</td><td>" + esc(v.name || v.name_en || "") +
+        "</td><td>" + esc(v.relative_name || "") + "</td><td>" + (v.age || "") + "</td><td>" + (v.gender || "") +
+        "</td><td>" + (v.ward_no || "") + "</td><td>" + esc(v.house_no || "") + "</td><td>" + esc(v.card_no || "") +
+        "</td><td>" + (v.preference || "") + "</td><td>" + (v.contacted ? "Yes" : "") + (v.voted ? " / Voted" : "") + "</td></tr>";
+    });
+    var body = "<h2>" + title + "</h2><div class='meta'>Printed: " + new Date().toLocaleString() + " | Total: " + list.length +
+      "</div><table><thead><tr><th>#</th><th>Sr No</th><th>Name</th><th>Father</th><th>Age</th><th>Gender</th><th>Ward</th><th>House</th><th>Card</th><th>Pref</th><th>Status</th></tr></thead><tbody>" +
+      rows + "</tbody></table>";
+    openPrintWindow(title, body);
+  }
+
+  function printAnalysis() {
+    var el = document.getElementById("analysisBody");
+    if (!el || !el.innerHTML.trim()) { alert("Pehle Full Analysis kholen"); return; }
+    var body = "<h2>Complete Data Analysis</h2><div class='meta'>Printed: " + new Date().toLocaleString() + "</div>" + el.innerHTML;
+    openPrintWindow("Analysis Report", body);
+  }
+
+  function printAgeList() {
+    if (!lastAgeList.length) { alert("Pehle age group select karein"); return; }
+    var rows = "";
+    lastAgeList.forEach(function (v, i) {
+      rows += "<tr><td>" + (i + 1) + "</td><td>" + (v.serial_no || "") + "</td><td>" + esc(v.name || v.name_en || "") +
+        "</td><td>" + esc(v.relative_name || "") + "</td><td>" + (v.age || "") + "</td><td>" + (v.gender || "") +
+        "</td><td>" + (v.ward_no || "") + "</td><td>" + esc(v.house_no || "") + "</td><td>" + esc(v.address || "") +
+        "</td><td>" + (v.polling_station_no || "") + "</td></tr>";
+    });
+    var body = "<h2>Age Group: " + lastAgeLabel + "</h2><div class='meta'>Printed: " + new Date().toLocaleString() + " | Total: " + lastAgeList.length +
+      "</div><table><thead><tr><th>#</th><th>Sr</th><th>Name</th><th>Father</th><th>Age</th><th>Sex</th><th>Ward</th><th>House</th><th>Address</th><th>Booth</th></tr></thead><tbody>" +
+      rows + "</tbody></table>";
+    openPrintWindow("Age List", body);
+  }
+
+  function bulkSet(field, value) {
+    var ids = Object.keys(selectedIds).filter(function (k) { return selectedIds[k]; });
+    if (!ids.length) { alert("Pehle checkbox se select karein"); return; }
+    voters.forEach(function (v) {
+      if (selectedIds[v.id]) {
+        if (value === "true") v[field] = true;
+        else if (value === "false") v[field] = false;
+        else v[field] = value;
+      }
+    });
+    selectedIds = {};
+    applyFilters();
+    scheduleAutoSave();
+    alert("Updated " + ids.length + " voters (auto-saving...)");
+  }
+
+  document.getElementById("btnImport").onclick = function () { safeModalShow("importModal"); };
+  document.getElementById("btnEmptyImport").onclick = function () { safeModalShow("importModal"); };
+  document.getElementById("btnModalImport").onclick = function () { hideLoadModal(); safeModalShow("importModal"); };
+  document.getElementById("btnDoImport").onclick = handleImport;
+  document.getElementById("btnExport").onclick = exportExcel;
+  document.getElementById("btnExport2").onclick = exportExcel;
+  document.getElementById("btnExportCsv").onclick = exportCSV;
+  document.getElementById("btnSave").onclick = saveToFirebase;
+  document.getElementById("btnLoadCloud").onclick = loadFromFirebase;
+  document.getElementById("btnEmptyLoad").onclick = loadFromFirebase;
+  document.getElementById("btnModalLoad").onclick = loadFromFirebase;
+  document.getElementById("btnClearSearch").onclick = function () { document.getElementById("searchInput").value = ""; currentPage = 1; applyFilters(); };
+  document.getElementById("filterWard").onchange = function () { currentPage = 1; applyFilters(); };
+  document.getElementById("filterPreference").onchange = function () { currentPage = 1; applyFilters(); };
+  document.getElementById("filterStatus").onchange = function () { currentPage = 1; applyFilters(); };
+  document.getElementById("searchInput").addEventListener("input", function () {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(function () { currentPage = 1; applyFilters(); }, 250);
+  });
+  document.getElementById("btnToggleView").onclick = function () {
+    viewMode = viewMode === "card" ? "table" : "card";
+    document.getElementById("viewIcon").className = viewMode === "card" ? "bi bi-grid-3x3-gap" : "bi bi-list-ul";
+    renderResults();
+  };
+  document.getElementById("btnFirst").onclick = function () { currentPage = 1; renderResults(); window.scrollTo(0, 0); };
+  document.getElementById("btnPrev").onclick = function () { if (currentPage > 1) { currentPage--; renderResults(); window.scrollTo(0, 0); } };
+  document.getElementById("btnNext").onclick = function () { if (currentPage < totalPages()) { currentPage++; renderResults(); window.scrollTo(0, 0); } };
+  document.getElementById("btnLast").onclick = function () { currentPage = totalPages(); renderResults(); window.scrollTo(0, 0); };
+  document.getElementById("btnFullAnalysis").onclick = showFullAnalysis;
+  document.getElementById("btnBoothSummary").onclick = showBoothSummary;
+  document.getElementById("btnWardGender").onclick = showWardGender;
+  document.getElementById("btnAgeList").onclick = showAgeList;
+  document.getElementById("btnPrintList").onclick = printCurrentList;
+  document.getElementById("btnPrintAnalysis").onclick = printAnalysis;
+  document.getElementById("btnPrintAge").onclick = printAgeList;
+  document.getElementById("btnSaveVoter").onclick = saveVoterDetail;
+  document.getElementById("btnDeleteVoter").onclick = deleteCurrentVoter;
+
+  document.querySelectorAll("[data-bulk]").forEach(function (btn) {
+    btn.onclick = function () {
+      var parts = btn.getAttribute("data-bulk").split(":");
+      bulkSet(parts[0], parts[1]);
+    };
+  });
+
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest(".open-detail");
+    if (t) { e.preventDefault(); e.stopPropagation(); openDetail(t.getAttribute("data-id")); return; }
+    var f = e.target.closest(".open-family");
+    if (f) { e.preventDefault(); showFamilyByVoterId(f.getAttribute("data-id")); return; }
+    var fb = e.target.closest(".fam-bulk");
+    if (fb) { e.preventDefault(); familyBulkAction(fb.getAttribute("data-field"), fb.getAttribute("data-val")); return; }
+    var ag = e.target.closest(".age-grp-btn");
+    if (ag) { renderAgeGroup(ag.getAttribute("data-key"), Number(ag.getAttribute("data-min")), Number(ag.getAttribute("data-max"))); return; }
+    if (e.target.classList.contains("sel-check")) {
+      selectedIds[e.target.value] = e.target.checked;
+    }
+  });
+
+
+  // Clean backdrops after any modal closes so clicks work again
+  document.querySelectorAll(".modal").forEach(function (modalEl) {
+    modalEl.addEventListener("hidden.bs.modal", function () {
+      document.querySelectorAll(".modal-backdrop").forEach(function (b) { b.remove(); });
+      document.body.classList.remove("modal-open");
+      document.body.style.removeProperty("overflow");
+      document.body.style.removeProperty("padding-right");
+    });
+  });
+
+  showEmpty();
+  // Auto-load from database on page open (no need to click every time)
+  setTimeout(function () {
+    window._silentLoad = true; loadFromFirebase().then(function () {
+      if (!voters.length) {
+        safeModalShow("loadDataModal");
+      }
+    }).catch(function () {
+      safeModalShow("loadDataModal");
+    });
+  }, 300);
+})();
+
+</script>
+</body>
+</html>
