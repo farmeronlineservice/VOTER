@@ -222,45 +222,146 @@
     } catch (e) { console.warn("modal hide", e); }
   }
 
-  function scheduleAutoSave() {
-    if (!autoSaveEnabled || !voters.length) return;
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(function () { autoSaveToFirebase(); }, 1200);
+  var dirtyIds = {}; // only these ids need cloud update
+  var CACHE_KEY = "voter_cache_v1";
+  var CACHE_META_KEY = "voter_cache_meta_v1";
+
+  function markDirty(id) {
+    if (id) dirtyIds[String(id)] = true;
   }
 
-  async function autoSaveToFirebase() {
-    if (!voters.length) return;
+  function markDirtyMany(ids) {
+    (ids || []).forEach(function (id) { markDirty(id); });
+  }
+
+  function cleanVoter(v) {
+    var clean = {};
+    Object.keys(v).forEach(function (k) { if (v[k] !== undefined) clean[k] = v[k]; });
+    return clean;
+  }
+
+  function saveLocalCache() {
     try {
-      var obj = {};
-      voters.forEach(function (v) {
-        var clean = {};
-        Object.keys(v).forEach(function (k) { if (v[k] !== undefined) clean[k] = v[k]; });
-        obj[String(v.id)] = clean;
+      localStorage.setItem(CACHE_KEY, JSON.stringify(voters));
+      localStorage.setItem(CACHE_META_KEY, JSON.stringify({ count: voters.length, savedAt: Date.now() }));
+    } catch (e) {
+      console.warn("localStorage full/unavailable", e);
+    }
+  }
+
+  function loadLocalCache() {
+    try {
+      var raw = localStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
+      var list = JSON.parse(raw);
+      if (!Array.isArray(list) || !list.length) return null;
+      return list;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function setSaveBadge(text, cls) {
+    var badge = document.getElementById("saveStatus");
+    if (badge) {
+      badge.textContent = text;
+      badge.className = "badge " + (cls || "bg-secondary");
+    }
+  }
+
+  function scheduleAutoSave() {
+    if (!autoSaveEnabled) return;
+    saveLocalCache(); // instant local — no network
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () { flushDirtyToFirebase(); }, 800);
+  }
+
+  // Only upload CHANGED voters — not full list
+  async function flushDirtyToFirebase() {
+    var ids = Object.keys(dirtyIds);
+    if (!ids.length) {
+      setSaveBadge("Up to date", "bg-success");
+      return;
+    }
+    setSaveBadge("Saving " + ids.length + "...", "bg-warning text-dark");
+    try {
+      var patch = {};
+      var mapById = {};
+      voters.forEach(function (v) { mapById[String(v.id)] = v; });
+      ids.forEach(function (id) {
+        if (mapById[id]) patch["voters/" + id] = cleanVoter(mapById[id]);
       });
+      patch["meta/updatedAt"] = new Date().toISOString();
+      patch["meta/count"] = voters.length;
+      patch["meta/lastPatchCount"] = ids.length;
+
       var ok = false;
       if (firebaseReady && db) {
         try {
-          await db.ref("voters").set(obj);
-          await db.ref("meta").set({ count: voters.length, updatedAt: new Date().toISOString() });
+          await db.ref().update(patch); // multi-path update — only dirty nodes
           ok = true;
-        } catch (e) { console.warn(e); }
+        } catch (e) { console.warn("SDK patch failed", e); }
       }
       if (!ok) {
-        var res = await fetch(FB_URL + "/voters.json", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) });
+        // REST: update each dirty voter (still not full dump)
+        for (var i = 0; i < ids.length; i++) {
+          var id = ids[i];
+          if (!mapById[id]) continue;
+          var res = await fetch(FB_URL + "/voters/" + encodeURIComponent(id) + ".json", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(cleanVoter(mapById[id]))
+          });
+          if (!res.ok) throw new Error("HTTP " + res.status + " for " + id);
+        }
+        await fetch(FB_URL + "/meta.json", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ updatedAt: new Date().toISOString(), count: voters.length, lastPatchCount: ids.length })
+        });
+      }
+      dirtyIds = {};
+      saveLocalCache();
+      setSaveBadge("Saved " + ids.length + " @ " + new Date().toLocaleTimeString(), "bg-success");
+    } catch (e) {
+      console.error("patch save failed", e);
+      setSaveBadge("Save failed", "bg-danger");
+    }
+  }
+
+  // Full upload only when user clicks Save or after import
+  async function saveFullToFirebase() {
+    if (!voters.length) { alert("Pehle data import karein"); return; }
+    showLoading("Full save " + voters.length + "...");
+    setSaveBadge("Full save...", "bg-warning text-dark");
+    try {
+      var obj = {};
+      voters.forEach(function (v) { obj[String(v.id)] = cleanVoter(v); });
+      var saved = false;
+      if (firebaseReady && db) {
+        try {
+          await db.ref("voters").set(obj);
+          await db.ref("meta").set({ count: voters.length, updatedAt: new Date().toISOString(), full: true });
+          saved = true;
+        } catch (e) { console.warn(e); }
+      }
+      if (!saved) {
+        var res = await fetch(FB_URL + "/voters.json", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(obj)
+        });
         if (!res.ok) throw new Error("HTTP " + res.status);
       }
-      var badge = document.getElementById("saveStatus");
-      if (badge) {
-        badge.textContent = "Saved " + new Date().toLocaleTimeString();
-        badge.className = "badge bg-success";
-      }
+      dirtyIds = {};
+      saveLocalCache();
+      hideLoading();
+      setSaveBadge("Full saved", "bg-success");
+      alert("Full save OK: " + voters.length + " voters");
     } catch (e) {
-      console.error("auto-save failed", e);
-      var badge2 = document.getElementById("saveStatus");
-      if (badge2) {
-        badge2.textContent = "Save failed";
-        badge2.className = "badge bg-danger";
-      }
+      hideLoading();
+      setSaveBadge("Save failed", "bg-danger");
+      alert("Save failed: " + (e.message || e));
     }
   }
 
@@ -324,79 +425,133 @@
   }
 
   async function saveToFirebase() {
-    if (!voters.length) { alert("Pehle data import karein"); return; }
-    showLoading("Saving " + voters.length + " voters...");
-    try {
-      var obj = {};
-      voters.forEach(function (v) {
-        var clean = {};
-        Object.keys(v).forEach(function (k) { if (v[k] !== undefined) clean[k] = v[k]; });
-        obj[String(v.id)] = clean;
-      });
-      var saved = false;
-      if (firebaseReady && db) {
-        try {
-          await db.ref("voters").set(obj);
-          await db.ref("meta").set({ count: voters.length, updatedAt: new Date().toISOString() });
-          saved = true;
-        } catch (e) { console.warn(e); }
-      }
-      if (!saved) {
-        var res = await fetch(FB_URL + "/voters.json", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-      }
-      hideLoading();
-      alert("Saved " + voters.length + " voters to Firebase");
-    } catch (e) {
-      hideLoading();
-      alert("Save failed: " + (e.message || e));
-    }
+    // Manual Save button = full save (import ke baad / backup)
+    return saveFullToFirebase();
   }
 
-  async function loadFromFirebase() {
-    showLoading("Loading from database...");
+  async function fetchCloudMeta() {
     try {
-      var data = null;
       if (firebaseReady && db) {
         try {
           var snap = await Promise.race([
-            db.ref("voters").once("value"),
-            new Promise(function (_, rej) { setTimeout(function () { rej(new Error("timeout")); }, 10000); })
+            db.ref("meta").once("value"),
+            new Promise(function (_, rej) { setTimeout(function () { rej(new Error("timeout")); }, 5000); })
           ]);
-          data = snap.val();
-        } catch (e) { console.warn(e); }
+          return snap.val() || null;
+        } catch (e) { console.warn("meta sdk", e); }
       }
-      if (data === null) {
-        var res = await fetch(FB_URL + "/voters.json");
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        data = await res.json();
-      }
-      if (!data) {
-        hideLoading();
-        alert("Database empty. Import Excel then Save.");
-        showEmpty();
-        return;
-      }
-      var list = Array.isArray(data) ? data.filter(Boolean) : Object.keys(data).map(function (k) { return data[k]; });
-      if (!list.length) {
-        hideLoading();
-        alert("Database empty.");
-        showEmpty();
-        return;
-      }
-      voters = sortVoters(list.map(normalizeVoter));
+      var res = await fetch(FB_URL + "/meta.json");
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function downloadFullVoters() {
+    var data = null;
+    if (firebaseReady && db) {
+      try {
+        var snap = await Promise.race([
+          db.ref("voters").once("value"),
+          new Promise(function (_, rej) { setTimeout(function () { rej(new Error("timeout")); }, 15000); })
+        ]);
+        data = snap.val();
+      } catch (e) { console.warn(e); }
+    }
+    if (data === null) {
+      var res = await fetch(FB_URL + "/voters.json");
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      data = await res.json();
+    }
+    if (!data) return [];
+    var list = Array.isArray(data) ? data.filter(Boolean) : Object.keys(data).map(function (k) { return data[k]; });
+    return list;
+  }
+
+  function applyVotersList(list, cloudMeta) {
+    voters = sortVoters(list.map(normalizeVoter));
+    dirtyIds = {};
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(voters));
+      localStorage.setItem(CACHE_META_KEY, JSON.stringify({
+        count: voters.length,
+        savedAt: Date.now(),
+        cloudUpdatedAt: (cloudMeta && cloudMeta.updatedAt) || null
+      }));
+    } catch (e) { console.warn(e); }
+    currentPage = 1;
+    hideLoadModal();
+    refreshUI();
+  }
+
+  async function loadFromFirebase() {
+    var forceCloud = !window._silentLoad; // button click = force check + reload if needed
+    window._silentLoad = false;
+
+    // 1) Show local cache immediately (0 download)
+    var cached = loadLocalCache();
+    var localMeta = null;
+    try { localMeta = JSON.parse(localStorage.getItem(CACHE_META_KEY) || "null"); } catch (e) {}
+    if (cached && cached.length) {
+      voters = sortVoters(cached.map(normalizeVoter));
       currentPage = 1;
-      hideLoading();
       hideLoadModal();
       refreshUI();
-      if (!window._silentLoad) {
-        alert(voters.length + " voters loaded (Ward then Sr No order)");
+      setSaveBadge("Local " + voters.length, "bg-info");
+    } else {
+      showLoading("Loading...");
+    }
+
+    // 2) Only fetch tiny meta.json — not full voters
+    var cloudMeta = await fetchCloudMeta();
+    var localStamp = localMeta && localMeta.cloudUpdatedAt ? String(localMeta.cloudUpdatedAt) : "";
+    var cloudStamp = cloudMeta && cloudMeta.updatedAt ? String(cloudMeta.updatedAt) : "";
+
+    var hasCache = !!(cached && cached.length);
+    var cloudHasUpdate = !!(cloudStamp && cloudStamp !== localStamp);
+    var noCache = !hasCache;
+
+    // Reload full data ONLY if: no cache OR cloud updatedAt changed
+    if (!(noCache || cloudHasUpdate || (forceCloud && !cloudStamp && noCache))) {
+      // cache valid, cloud same → no full download
+      hideLoading();
+      setSaveBadge("Synced " + voters.length, "bg-success");
+      if (forceCloud && hasCache && !cloudHasUpdate) {
+        // user clicked load but nothing new
+        setSaveBadge("No new updates", "bg-success");
       }
-      window._silentLoad = false;
+      if (!voters.length) showEmpty();
+      return;
+    }
+
+    // 3) Full download only when needed
+    if (!voters.length) showLoading("Downloading data...");
+    else setSaveBadge("Updating...", "bg-warning text-dark");
+
+    try {
+      var list = await downloadFullVoters();
+      hideLoading();
+      if (!list.length) {
+        if (!voters.length) {
+          showEmpty();
+          if (forceCloud) alert("Database empty");
+        } else {
+          setSaveBadge("Local only", "bg-info");
+        }
+        return;
+      }
+      applyVotersList(list, cloudMeta);
+      setSaveBadge("Updated " + voters.length, "bg-success");
+      if (forceCloud) alert(voters.length + " voters updated from cloud");
     } catch (e) {
       hideLoading();
-      alert("Load failed: " + (e.message || e));
-      showEmpty();
+      if (voters.length) {
+        setSaveBadge("Offline local", "bg-warning text-dark");
+      } else {
+        showEmpty();
+        if (forceCloud) alert("Load failed: " + (e.message || e));
+      }
     }
   }
 
@@ -472,6 +627,8 @@
           voters = imported;
         }
         voters = sortVoters(voters);
+        dirtyIds = {};
+        saveLocalCache();
         currentPage = 1;
         hideLoading();
         safeModalHide("importModal");
@@ -723,10 +880,13 @@
     var key = window._famKey;
     if (!key) return;
     var fam = getFamilies()[key] || [];
+    var ids = [];
     fam.forEach(function (m) {
       if (value === "true") m[field] = true;
       else m[field] = value;
+      ids.push(m.id);
     });
+    markDirtyMany(ids);
     showFamilyByVoterId(fam[0].id);
     applyFilters();
     scheduleAutoSave();
@@ -804,6 +964,7 @@
     v.symbol_made = document.getElementById("d_symbol").checked;
     v.migrated = document.getElementById("d_migrated").checked;
     v.old_age = document.getElementById("d_old").checked;
+    markDirty(v.id);
     safeModalHide("detailModal");
     applyFilters();
     scheduleAutoSave();
@@ -811,10 +972,19 @@
 
   function deleteCurrentVoter() {
     if (!confirm("Delete this voter?")) return;
-    voters = voters.filter(function (x) { return x.id !== currentVoterId; });
+    var delId = currentVoterId;
+    voters = voters.filter(function (x) { return x.id !== delId; });
     safeModalHide("detailModal");
     applyFilters();
-    scheduleAutoSave();
+    saveLocalCache();
+    // remove node from firebase only
+    (async function () {
+      try {
+        if (firebaseReady && db) await db.ref("voters/" + delId).remove();
+        else await fetch(FB_URL + "/voters/" + encodeURIComponent(delId) + ".json", { method: "DELETE" });
+        setSaveBadge("Deleted", "bg-success");
+      } catch (e) { console.warn(e); setSaveBadge("Delete cloud fail", "bg-danger"); }
+    })();
   }
 
   function showFullAnalysis() {
@@ -1096,10 +1266,11 @@
         else v[field] = value;
       }
     });
+    markDirtyMany(ids);
     selectedIds = {};
     applyFilters();
     scheduleAutoSave();
-    alert("Updated " + ids.length + " voters (auto-saving...)");
+    alert("Updated " + ids.length + " (sirf yahi cloud pe save honge)");
   }
 
   document.getElementById("btnImport").onclick = function () { safeModalShow("importModal"); };
