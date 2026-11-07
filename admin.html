@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin — Gram Panchayat Manager</title>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet" />
+  <style>
+    body { background: #f0f2f5; }
+    .navbar { background: linear-gradient(135deg, #4a148c, #6a1b9a) !important; }
+    .gp-card { border: none; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+    .gp-card:hover { box-shadow: 0 4px 14px rgba(0,0,0,.12); }
+    .link-box { background: #f1f3f5; border-radius: 8px; padding: 8px 10px; font-size: 0.8rem; word-break: break-all; border: 1px solid #dee2e6; }
+    #loading { position: fixed; inset: 0; background: rgba(255,255,255,.85); display: none; align-items: center; justify-content: center; z-index: 9999; flex-direction: column; gap: 8px; }
+    .stat { font-size: 1.4rem; font-weight: 700; }
+    .action-bar .btn { margin: 2px; }
+  </style>
+</head>
+<body>
+
+<div id="loginScreen" style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#4a148c,#6a1b9a);">
+  <div class="card shadow-lg" style="width:100%;max-width:380px;border:none;border-radius:16px;">
+    <div class="card-body p-4">
+      <h4 class="text-center mb-3"><i class="bi bi-shield-lock"></i> Admin Login</h4>
+      <div class="mb-3">
+        <label class="form-label">User ID</label>
+        <input type="text" id="loginId" class="form-control form-control-lg" placeholder="admin" autocomplete="username" />
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Password</label>
+        <input type="password" id="loginPass" class="form-control form-control-lg" placeholder="••••••••" autocomplete="current-password" />
+      </div>
+      <div id="loginError" class="text-danger small mb-2" style="display:none;">Galat ID ya Password</div>
+      <button type="button" class="btn btn-primary btn-lg w-100" id="btnLogin">Login</button>
+    </div>
+  </div>
+</div>
+<div id="adminApp" style="display:none;">
+
+<div id="loading">
+  <div class="spinner-border text-primary"></div>
+  <div id="loadingText" class="small text-muted">Please wait...</div>
+</div>
+
+<nav class="navbar navbar-dark sticky-top mb-3">
+  <div class="container">
+    <span class="navbar-brand mb-0"><i class="bi bi-shield-lock me-2"></i>Admin Panel</span>
+    <span class="text-white-50 small d-none d-md-inline">Panchayat · Link · Data Manage</span>
+  </div>
+</nav>
+
+<div class="container pb-5">
+  <!-- Add / tools -->
+  <div class="row g-3 mb-4">
+    <div class="col-lg-5">
+      <div class="card gp-card h-100">
+        <div class="card-header bg-white fw-semibold">Naya / Update Panchayat</div>
+        <div class="card-body">
+          <div class="mb-2">
+            <label class="form-label">Panchayat Name</label>
+            <input type="text" id="gpName" class="form-control" placeholder="jaise: Deori" />
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Slug (link)</label>
+            <input type="text" id="gpSlug" class="form-control" placeholder="deori" />
+            <div class="form-text">English small letters — link mein use hoga</div>
+          </div>
+          <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-primary" type="button" id="btnAddGp"><i class="bi bi-plus-lg"></i> Add / Save</button>
+            <button class="btn btn-outline-secondary" type="button" id="btnClearForm">Clear</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-7">
+      <div class="card gp-card h-100">
+        <div class="card-header bg-white fw-semibold">Data tools</div>
+        <div class="card-body">
+          <div class="row g-2">
+            <div class="col-md-6">
+              <label class="form-label small">Target Panchayat</label>
+              <select id="toolGp" class="form-select form-select-sm"></select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Excel Import to GP</label>
+              <input type="file" id="importFile" class="form-control form-control-sm" accept=".xlsx,.xls,.csv" />
+            </div>
+          </div>
+          <div class="action-bar mt-3">
+            <button class="btn btn-sm btn-success" type="button" id="btnImportExcel"><i class="bi bi-upload"></i> Import Excel → GP</button>
+            <button class="btn btn-sm btn-info text-white" type="button" id="btnLoadCount"><i class="bi bi-cloud-download"></i> Load / Count Data</button>
+            <button class="btn btn-sm btn-warning" type="button" id="btnMigrate"><i class="bi bi-arrow-left-right"></i> Migrate Root /voters</button>
+            <button class="btn btn-sm btn-outline-danger" type="button" id="btnClearData"><i class="bi bi-eraser"></i> Clear GP Voters</button>
+          </div>
+          <p class="small text-muted mt-2 mb-0">Import / Clear / Migrate sirf selected panchayat par lagenge. Panchayat delete alag button se.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+    <h5 class="mb-0">Sabhi Gram Panchayat + Links</h5>
+    <button class="btn btn-sm btn-outline-primary" type="button" id="btnRefresh"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+  </div>
+  <div id="gpList" class="row g-3"></div>
+  <div id="emptyGp" class="text-center text-muted py-5" style="display:none;">
+    Abhi koi panchayat nahi. Upar se add karein.
+  </div>
+</div>
+
+<!-- Preview modal -->
+<div class="modal fade" id="previewModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="previewTitle">Data</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="previewBody"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(function () {
+  var FB_URL = "https://voter-c464f-default-rtdb.firebaseio.com";
+  var db = null, firebaseReady = false;
+  var gpListCache = [];
+
+  try {
+    if (!firebase.apps.length) firebase.initializeApp({ databaseURL: FB_URL + "/" });
+    db = firebase.database();
+    firebaseReady = true;
+  } catch (e) { console.warn(e); }
+
+  function slugify(s) {
+    return String(s || "").trim().toLowerCase()
+      .replace(/[\s_]+/g, "-")
+      .replace(/[^a-z0-9\u0900-\u097f-]/g, "")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "") || "";
+  }
+
+  function showLoading(on, msg) {
+    document.getElementById("loading").style.display = on ? "flex" : "none";
+    document.getElementById("loadingText").textContent = msg || "Please wait...";
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function appLink(slug) {
+    var path = location.pathname.replace(/admin\.html$/i, "index.html");
+    if (!/index\.html$/i.test(path)) {
+      path = path.replace(/\/?$/, "/") + "index.html";
+    }
+    return location.origin + path + "?gp=" + encodeURIComponent(slug);
+  }
+
+  async function fetchJson(path) {
+    if (firebaseReady && db) {
+      try {
+        var snap = await db.ref(path).once("value");
+        return snap.val();
+      } catch (e) { console.warn(e); }
+    }
+    var res = await fetch(FB_URL + "/" + path + ".json");
+    if (!res.ok) return null;
+    return await res.json();
+  }
+
+  async function putJson(path, data) {
+    if (firebaseReady && db) {
+      await db.ref(path).set(data);
+      return;
+    }
+    var res = await fetch(FB_URL + "/" + path + ".json", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+  }
+
+  async function updateJson(path, data) {
+    if (firebaseReady && db) {
+      await db.ref(path).update(data);
+      return;
+    }
+    var res = await fetch(FB_URL + "/" + path + ".json", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+  }
+
+  async function deletePath(path) {
+    if (firebaseReady && db) {
+      await db.ref(path).remove();
+      return;
+    }
+    var res = await fetch(FB_URL + "/" + path + ".json", { method: "DELETE" });
+    if (!res.ok && res.status !== 404) throw new Error("HTTP " + res.status);
+  }
+
+  function normalizeVoters(data) {
+    if (!data) return {};
+    if (Array.isArray(data)) {
+      var obj = {};
+      data.filter(Boolean).forEach(function (v, i) {
+        var id = String((v && v.id) || ("row_" + i));
+        obj[id] = v;
+      });
+      return obj;
+    }
+    return data;
+  }
+
+  function countVoters(data) {
+    if (!data) return 0;
+    if (Array.isArray(data)) return data.filter(Boolean).length;
+    return Object.keys(data).length;
+  }
+
+  async function loadPanchayats() {
+    showLoading(true, "Loading panchayats...");
+    try {
+      var data = await fetchJson("panchayats");
+      var list = [];
+      if (data) {
+        Object.keys(data).forEach(function (k) {
+          var p = data[k] || {};
+          list.push({
+            slug: p.slug || k,
+            name: p.name || k,
+            count: p.count || 0,
+            updatedAt: p.updatedAt || "",
+            createdAt: p.createdAt || ""
+          });
+        });
+      }
+      list.sort(function (a, b) { return String(a.name).localeCompare(String(b.name), "hi"); });
+      gpListCache = list;
+      renderList(list);
+      fillToolSelect(list);
+    } catch (e) {
+      alert("Load failed: " + e.message);
+    }
+    showLoading(false);
+  }
+
+  function fillToolSelect(list) {
+    var opts = list.map(function (p) {
+      return '<option value="' + esc(p.slug) + '">' + esc(p.name) + " (" + esc(p.slug) + ")</option>";
+    }).join("");
+    document.getElementById("toolGp").innerHTML = opts || '<option value="">Pehle GP add karein</option>';
+  }
+
+  function renderList(list) {
+    var el = document.getElementById("gpList");
+    var empty = document.getElementById("emptyGp");
+    if (!list.length) {
+      el.innerHTML = "";
+      empty.style.display = "block";
+      return;
+    }
+    empty.style.display = "none";
+    el.innerHTML = list.map(function (p) {
+      var link = appLink(p.slug);
+      return '<div class="col-md-6 col-xl-4">' +
+        '<div class="card gp-card h-100">' +
+        '<div class="card-body">' +
+        '<div class="d-flex justify-content-between align-items-start mb-1">' +
+        '<h5 class="card-title mb-0">' + esc(p.name) + '</h5>' +
+        '<span class="badge bg-primary">' + (p.count || 0) + ' voters</span>' +
+        '</div>' +
+        '<div class="small text-muted mb-1">Slug: <code>' + esc(p.slug) + '</code></div>' +
+        (p.updatedAt ? '<div class="small text-muted mb-2">Updated: ' + esc(String(p.updatedAt).replace("T", " ").slice(0, 19)) + '</div>' : '') +
+        '<label class="form-label small mb-1">Panchayat Link</label>' +
+        '<div class="link-box mb-2" id="link-' + esc(p.slug) + '">' + esc(link) + '</div>' +
+        '<div class="d-flex flex-wrap gap-1 action-bar">' +
+        '<a class="btn btn-sm btn-primary" href="' + link + '" target="_blank"><i class="bi bi-box-arrow-up-right"></i> Open App</a>' +
+        '<button type="button" class="btn btn-sm btn-outline-secondary btn-copy" data-link="' + encodeURIComponent(link) + '"><i class="bi bi-clipboard"></i> Copy Link</button>' +
+        '<button type="button" class="btn btn-sm btn-outline-info btn-preview" data-slug="' + esc(p.slug) + '" data-name="' + esc(p.name) + '"><i class="bi bi-eye"></i> View Data</button>' +
+        '<button type="button" class="btn btn-sm btn-outline-dark btn-edit" data-slug="' + esc(p.slug) + '" data-name="' + esc(p.name) + '"><i class="bi bi-pencil"></i> Edit</button>' +
+        '<button type="button" class="btn btn-sm btn-outline-warning btn-clear" data-slug="' + esc(p.slug) + '"><i class="bi bi-eraser"></i> Clear Data</button>' +
+        '<button type="button" class="btn btn-sm btn-outline-danger btn-del" data-slug="' + esc(p.slug) + '"><i class="bi bi-trash"></i> Delete GP</button>' +
+        '</div></div></div></div>';
+    }).join("");
+  }
+
+  // form
+  document.getElementById("gpName").addEventListener("input", function () {
+    var slugEl = document.getElementById("gpSlug");
+    if (!slugEl.dataset.manual) slugEl.value = slugify(this.value);
+  });
+  document.getElementById("gpSlug").addEventListener("input", function () {
+    this.dataset.manual = "1";
+    this.value = slugify(this.value);
+  });
+  document.getElementById("btnClearForm").onclick = function () {
+    document.getElementById("gpName").value = "";
+    document.getElementById("gpSlug").value = "";
+    delete document.getElementById("gpSlug").dataset.manual;
+  };
+
+  document.getElementById("btnAddGp").onclick = async function () {
+    var name = document.getElementById("gpName").value.trim();
+    var slug = slugify(document.getElementById("gpSlug").value || name);
+    if (!name || !slug) { alert("Name aur slug zaroori"); return; }
+    showLoading(true, "Saving panchayat...");
+    try {
+      var existing = await fetchJson("panchayats/" + slug);
+      var payload = {
+        name: name,
+        slug: slug,
+        count: (existing && existing.count) || 0,
+        createdAt: (existing && existing.createdAt) || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await putJson("panchayats/" + slug, payload);
+      document.getElementById("btnClearForm").click();
+      await loadPanchayats();
+      alert("Saved: " + name + "\nLink:\n" + appLink(slug));
+    } catch (e) {
+      alert("Failed: " + e.message);
+    }
+    showLoading(false);
+  };
+
+  document.getElementById("btnRefresh").onclick = loadPanchayats;
+
+  // Card actions
+  document.getElementById("gpList").addEventListener("click", async function (e) {
+    var copy = e.target.closest(".btn-copy");
+    if (copy) {
+      var link = decodeURIComponent(copy.getAttribute("data-link"));
+      try { await navigator.clipboard.writeText(link); alert("Link copy: " + link); }
+      catch (err) { prompt("Copy:", link); }
+      return;
+    }
+
+    var edit = e.target.closest(".btn-edit");
+    if (edit) {
+      document.getElementById("gpName").value = edit.getAttribute("data-name") || "";
+      var slugEl = document.getElementById("gpSlug");
+      slugEl.value = edit.getAttribute("data-slug") || "";
+      slugEl.dataset.manual = "1";
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    var preview = e.target.closest(".btn-preview");
+    if (preview) {
+      var slug = preview.getAttribute("data-slug");
+      var name = preview.getAttribute("data-name");
+      showLoading(true, "Loading voters...");
+      try {
+        var data = await fetchJson("gp/" + slug + "/voters");
+        var obj = normalizeVoters(data);
+        var ids = Object.keys(obj);
+        var sample = ids.slice(0, 30).map(function (id, i) {
+          var v = obj[id] || {};
+          return "<tr><td>" + (i + 1) + "</td><td>" + esc(v.serial_no || "") + "</td><td>" + esc(v.name || v.name_en || "") +
+            "</td><td>" + esc(v.relative_name || "") + "</td><td>" + esc(v.ward_no || "") + "</td><td>" + esc(v.house_no || "") + "</td></tr>";
+        }).join("");
+        document.getElementById("previewTitle").textContent = name + " — " + ids.length + " voters";
+        document.getElementById("previewBody").innerHTML =
+          "<p class='small'>Link: <code>" + esc(appLink(slug)) + "</code></p>" +
+          (ids.length ? ('<div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>#</th><th>Sr</th><th>Name</th><th>Father</th><th>Ward</th><th>House</th></tr></thead><tbody>' +
+            sample + "</tbody></table></div>" + (ids.length > 30 ? "<p class='small text-muted'>Pehle 30 dikhaye...</p>" : "")) :
+            "<p class='text-muted'>Is panchayat mein abhi data nahi. Import Excel use karein.</p>");
+        // update count on card meta
+        await updateJson("panchayats/" + slug, { count: ids.length, updatedAt: new Date().toISOString() });
+        new bootstrap.Modal(document.getElementById("previewModal")).show();
+        await loadPanchayats();
+      } catch (err) {
+        alert("View failed: " + err.message);
+      }
+      showLoading(false);
+      return;
+    }
+
+    var clearBtn = e.target.closest(".btn-clear");
+    if (clearBtn) {
+      var slug = clearBtn.getAttribute("data-slug");
+      if (!confirm("Clear ALL voters of: " + slug + "?\nPanchayat entry rahegi, data delete.")) return;
+      if (!confirm("Pakka clear?")) return;
+      showLoading(true, "Clearing data...");
+      try {
+        await deletePath("gp/" + slug + "/voters");
+        await putJson("gp/" + slug + "/meta", { count: 0, updatedAt: new Date().toISOString(), cleared: true });
+        await updateJson("panchayats/" + slug, { count: 0, updatedAt: new Date().toISOString() });
+        // clear local caches for this gp on this browser
+        try {
+          localStorage.removeItem("voter_cache_" + slug);
+          localStorage.removeItem("voter_cache_meta_" + slug);
+        } catch (e2) {}
+        await loadPanchayats();
+        alert("Data cleared: " + slug);
+      } catch (err) {
+        alert("Clear failed: " + err.message);
+      }
+      showLoading(false);
+      return;
+    }
+
+    var del = e.target.closest(".btn-del");
+    if (del) {
+      var slug = del.getAttribute("data-slug");
+      if (!confirm("DELETE panchayat + data?\n" + slug)) return;
+      if (!confirm("Last confirm — undo nahi hoga.")) return;
+      showLoading(true, "Deleting...");
+      try {
+        await deletePath("panchayats/" + slug);
+        await deletePath("gp/" + slug);
+        try {
+          localStorage.removeItem("voter_cache_" + slug);
+          localStorage.removeItem("voter_cache_meta_" + slug);
+        } catch (e2) {}
+        await loadPanchayats();
+        alert("Deleted: " + slug);
+      } catch (err) {
+        alert("Delete failed: " + err.message);
+      }
+      showLoading(false);
+    }
+  });
+
+  // Tools
+  document.getElementById("btnLoadCount").onclick = async function () {
+    var slug = document.getElementById("toolGp").value;
+    if (!slug) { alert("GP select karein"); return; }
+    showLoading(true, "Counting...");
+    try {
+      var data = await fetchJson("gp/" + slug + "/voters");
+      var n = countVoters(data);
+      await updateJson("panchayats/" + slug, { count: n, updatedAt: new Date().toISOString() });
+      await putJson("gp/" + slug + "/meta", { count: n, updatedAt: new Date().toISOString() });
+      await loadPanchayats();
+      alert(slug + " → " + n + " voters");
+    } catch (e) {
+      alert(e.message);
+    }
+    showLoading(false);
+  };
+
+  document.getElementById("btnClearData").onclick = async function () {
+    var slug = document.getElementById("toolGp").value;
+    if (!slug) { alert("GP select karein"); return; }
+    if (!confirm("Clear voters: " + slug + "?")) return;
+    showLoading(true, "Clearing...");
+    try {
+      await deletePath("gp/" + slug + "/voters");
+      await putJson("gp/" + slug + "/meta", { count: 0, updatedAt: new Date().toISOString() });
+      await updateJson("panchayats/" + slug, { count: 0, updatedAt: new Date().toISOString() });
+      try {
+        localStorage.removeItem("voter_cache_" + slug);
+        localStorage.removeItem("voter_cache_meta_" + slug);
+      } catch (e2) {}
+      await loadPanchayats();
+      alert("Cleared: " + slug);
+    } catch (e) {
+      alert(e.message);
+    }
+    showLoading(false);
+  };
+
+  document.getElementById("btnMigrate").onclick = async function () {
+    var slug = document.getElementById("toolGp").value;
+    if (!slug) { alert("Target GP chunein"); return; }
+    if (!confirm("Root /voters → gp/" + slug + " migrate?")) return;
+    showLoading(true, "Migrating...");
+    try {
+      var data = await fetchJson("voters");
+      if (!data) { alert("Root /voters empty"); showLoading(false); return; }
+      var obj = normalizeVoters(data);
+      var count = Object.keys(obj).length;
+      await putJson("gp/" + slug + "/voters", obj);
+      await putJson("gp/" + slug + "/meta", { count: count, updatedAt: new Date().toISOString(), migrated: true });
+      var p = await fetchJson("panchayats/" + slug) || { name: slug, slug: slug };
+      p.count = count;
+      p.updatedAt = new Date().toISOString();
+      await putJson("panchayats/" + slug, p);
+      await loadPanchayats();
+      alert("Migrated " + count + " → " + slug);
+    } catch (e) {
+      alert("Migrate failed: " + e.message);
+    }
+    showLoading(false);
+  };
+
+  document.getElementById("btnImportExcel").onclick = async function () {
+    var slug = document.getElementById("toolGp").value;
+    var file = document.getElementById("importFile").files[0];
+    if (!slug) { alert("GP select karein"); return; }
+    if (!file) { alert("Excel file chunein"); return; }
+    if (!confirm("Import Excel into: " + slug + "?\nPurana data replace hoga.")) return;
+    showLoading(true, "Reading Excel...");
+    try {
+      var buf = await file.arrayBuffer();
+      var wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+      var rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+      var obj = {};
+      rows.forEach(function (r, i) {
+        var id = String(r.id || r.ID || r.card_no || r.EPIC || ("imp_" + i));
+        obj[id] = {
+          id: id,
+          grampanchayat: r.grampanchayat || r.GramPanchayat || slug,
+          ward_no: r.ward_no || r.Ward || r.ward || "",
+          serial_no: r.serial_no || r.Serial || r.sr_no || "",
+          name: r.name || r.Name || "",
+          name_en: r.name_en || "",
+          relative_name: r.relative_name || r.father_name || "",
+          age: r.age || r.Age || "",
+          card_no: r.card_no || r.EPIC || "",
+          gender: r.gender || r.Gender || "",
+          house_no: r.house_no || r.House || r.makan || "",
+          address: r.address || r.Address || "",
+          polling_station_no: r.polling_station_no || r.PS || "",
+          booth_address: r.booth_address || "",
+          preference: r.preference || "undecided",
+          contacted: false, voted: false, slip_given: false, symbol_made: false, migrated: false,
+          religion: "", caste: "", leader: "", notes: "", phone: r.phone || r.mobile || ""
+        };
+      });
+      var count = Object.keys(obj).length;
+      showLoading(true, "Uploading " + count + "...");
+      await putJson("gp/" + slug + "/voters", obj);
+      await putJson("gp/" + slug + "/meta", { count: count, updatedAt: new Date().toISOString(), imported: true });
+      await updateJson("panchayats/" + slug, { count: count, updatedAt: new Date().toISOString() });
+      try {
+        localStorage.removeItem("voter_cache_" + slug);
+        localStorage.removeItem("voter_cache_meta_" + slug);
+      } catch (e2) {}
+      await loadPanchayats();
+      alert("Imported " + count + " voters → " + slug + "\nOpen: " + appLink(slug));
+      document.getElementById("importFile").value = "";
+    } catch (e) {
+      alert("Import failed: " + e.message);
+    }
+    showLoading(false);
+  };
+
+  function tryLogin() {
+    var id = (document.getElementById("loginId").value || "").trim();
+    var pass = document.getElementById("loginPass").value || "";
+    if (id === "admin" && pass === "admin123") {
+      sessionStorage.setItem("admin_ok", "1");
+      document.getElementById("loginScreen").style.display = "none";
+      document.getElementById("adminApp").style.display = "block";
+      loadPanchayats();
+    } else {
+      document.getElementById("loginError").style.display = "block";
+    }
+  }
+  document.getElementById("btnLogin").onclick = tryLogin;
+  document.getElementById("loginPass").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") tryLogin();
+  });
+  document.getElementById("loginId").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") tryLogin();
+  });
+  if (sessionStorage.getItem("admin_ok") === "1") {
+    document.getElementById("loginScreen").style.display = "none";
+    document.getElementById("adminApp").style.display = "block";
+    loadPanchayats();
+  }
+})();
+</script>
+</div><!--adminApp-->
+</body>
+</html>

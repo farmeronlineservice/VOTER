@@ -57,7 +57,7 @@
 <body>
 <div id="loadingOverlay"><div class="text-center"><div class="spinner-border text-primary" style="width:3rem;height:3rem;"></div><div class="mt-2 fw-semibold" id="loadingText">Loading...</div></div></div>
 <nav class="navbar navbar-dark sticky-top shadow-sm"><div class="container-fluid">
-<span class="navbar-brand mb-0 h1 fs-5"><i class="bi bi-people-fill me-2"></i>Voter Management</span>
+<span class="navbar-brand mb-0 h1 fs-5"><i class="bi bi-people-fill me-2"></i><span id="appTitle">Voter Management</span></span>
 <div class="d-flex gap-2">
 <button class="btn btn-sm btn-outline-light" type="button" id="btnImport"><i class="bi bi-upload"></i> Import</button>
 <button class="btn btn-sm btn-outline-light" type="button" id="btnExport"><i class="bi bi-download"></i> Excel</button>
@@ -70,8 +70,8 @@
 <div class="col-4 col-md-2"><div class="card stat-card text-center p-2"><div class="fs-4 fw-bold text-primary" id="statTotal">0</div><div class="small text-muted">Total GP</div></div></div>
 <div class="col-4 col-md-2"><div class="card stat-card text-center p-2"><div class="fs-4 fw-bold text-info" id="statMale">0</div><div class="small text-muted">Male</div></div></div>
 <div class="col-4 col-md-2"><div class="card stat-card text-center p-2"><div class="fs-4 fw-bold text-danger" id="statFemale">0</div><div class="small text-muted">Female</div></div></div>
-<div class="col-4 col-md-2"><div class="card stat-card text-center p-2"><div class="fs-4 fw-bold text-success" id="statOurs">0</div><div class="small text-muted">Hamare</div></div></div>
-<div class="col-4 col-md-2"><div class="card stat-card text-center p-2"><div class="fs-4 fw-bold text-warning" id="statOther">0</div><div class="small text-muted">Doosre</div></div></div>
+<div class="col-4 col-md-2"><div class="card stat-card text-center p-2"><div class="fs-4 fw-bold text-success" id="statBooths">0</div><div class="small text-muted">Booths</div></div></div>
+<div class="col-4 col-md-2"><div class="card stat-card text-center p-2"><div class="fs-4 fw-bold text-warning" id="statWards">0</div><div class="small text-muted">Wards</div></div></div>
 <div class="col-4 col-md-2"><div class="card stat-card text-center p-2"><div class="fs-4 fw-bold text-secondary" id="statFamilies">0</div><div class="small text-muted">Families</div></div></div>
 </div>
 <div class="search-box"><div class="row g-2">
@@ -79,7 +79,7 @@
 <input type="text" id="searchInput" class="form-control" placeholder="Name / Father / Card / House / Sr No..." autocomplete="off" />
 <button class="btn btn-outline-secondary" type="button" id="btnClearSearch"><i class="bi bi-x-lg"></i></button></div></div>
 <div class="col-6 col-md-2"><select id="filterWard" class="form-select"><option value="">Sabhi Ward</option></select></div>
-<div class="col-6 col-md-2"><select id="filterPreference" class="form-select"><option value="">Sabhi Preference</option><option value="ours">Hamare</option><option value="other">Doosre</option><option value="undecided">Anirnit</option></select></div>
+<div class="col-6 col-md-2"><select id="filterBooth" class="form-select"><option value="">Sabhi Booth</option></select></div>
 <div class="col-6 col-md-2"><select id="filterStatus" class="form-select">
 <option value="">Sabhi Status</option><option value="contacted">Contacted</option><option value="not_contacted">Not Contacted</option>
 <option value="voted">Voted</option><option value="slip">Slip Given</option><option value="symbol">Symbol Made</option>
@@ -89,8 +89,6 @@
 <div class="col-6 col-md-1"><button class="btn btn-outline-primary w-100" type="button" id="btnToggleView"><i class="bi bi-grid-3x3-gap" id="viewIcon"></i></button></div>
 </div></div>
 <div class="filter-bar d-flex flex-wrap gap-2 align-items-center">
-<button class="btn btn-sm btn-outline-success" type="button" data-bulk="preference:ours">Mark Ours</button>
-<button class="btn btn-sm btn-outline-danger" type="button" data-bulk="preference:other">Mark Other</button>
 <button class="btn btn-sm btn-outline-primary" type="button" data-bulk="contacted:true">Mark Contacted</button>
 <button class="btn btn-sm btn-outline-warning" type="button" data-bulk="slip_given:true">Slip Given</button>
 <button class="btn btn-sm btn-outline-info" type="button" data-bulk="symbol_made:true">Symbol Made</button>
@@ -178,6 +176,41 @@
   var firebaseReady = false;
   var searchTimer = null;
 
+  // ---- Multi Gram Panchayat ----
+  function slugify(s) {
+    return String(s || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_]+/g, "-")
+      .replace(/[^a-z0-9\u0900-\u097f-]/g, "")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "") || "default";
+  }
+
+  function getGpSlug() {
+    var q = new URLSearchParams(window.location.search);
+    var g = q.get("gp") || q.get("panchayat") || "";
+    if (g) return slugify(g);
+    // hash support #gp=deori
+    var h = (window.location.hash || "").replace(/^#/, "");
+    if (h.indexOf("gp=") === 0) return slugify(h.slice(3));
+    return "";
+  }
+
+  var GP_SLUG = getGpSlug();
+  var CACHE_KEY = "voter_cache_" + (GP_SLUG || "default");
+  var CACHE_META_KEY = "voter_cache_meta_" + (GP_SLUG || "default");
+
+  function votersPath() {
+    return GP_SLUG ? ("gp/" + GP_SLUG + "/voters") : "voters";
+  }
+  function metaPath() {
+    return GP_SLUG ? ("gp/" + GP_SLUG + "/meta") : "meta";
+  }
+  function voterNodePath(id) {
+    return votersPath() + "/" + id;
+  }
+
   try {
     if (!firebase.apps.length) {
       firebase.initializeApp({ databaseURL: FB_URL + "/" });
@@ -223,8 +256,6 @@
   }
 
   var dirtyIds = {}; // only these ids need cloud update
-  var CACHE_KEY = "voter_cache_v1";
-  var CACHE_META_KEY = "voter_cache_meta_v1";
 
   function markDirty(id) {
     if (id) dirtyIds[String(id)] = true;
@@ -289,11 +320,15 @@
       var mapById = {};
       voters.forEach(function (v) { mapById[String(v.id)] = v; });
       ids.forEach(function (id) {
-        if (mapById[id]) patch["voters/" + id] = cleanVoter(mapById[id]);
+        if (mapById[id]) patch[voterNodePath(id)] = cleanVoter(mapById[id]);
       });
-      patch["meta/updatedAt"] = new Date().toISOString();
-      patch["meta/count"] = voters.length;
-      patch["meta/lastPatchCount"] = ids.length;
+      patch[metaPath() + "/updatedAt"] = new Date().toISOString();
+      patch[metaPath() + "/count"] = voters.length;
+      patch[metaPath() + "/lastPatchCount"] = ids.length;
+      if (GP_SLUG) {
+        patch["panchayats/" + GP_SLUG + "/count"] = voters.length;
+        patch["panchayats/" + GP_SLUG + "/updatedAt"] = new Date().toISOString();
+      }
 
       var ok = false;
       if (firebaseReady && db) {
@@ -307,14 +342,14 @@
         for (var i = 0; i < ids.length; i++) {
           var id = ids[i];
           if (!mapById[id]) continue;
-          var res = await fetch(FB_URL + "/voters/" + encodeURIComponent(id) + ".json", {
+          var res = await fetch(FB_URL + "/" + voterNodePath(id) + ".json", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(cleanVoter(mapById[id]))
           });
           if (!res.ok) throw new Error("HTTP " + res.status + " for " + id);
         }
-        await fetch(FB_URL + "/meta.json", {
+        await fetch(FB_URL + "/" + metaPath() + ".json", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ updatedAt: new Date().toISOString(), count: voters.length, lastPatchCount: ids.length })
@@ -340,16 +375,24 @@
       var saved = false;
       if (firebaseReady && db) {
         try {
-          await db.ref("voters").set(obj);
-          await db.ref("meta").set({ count: voters.length, updatedAt: new Date().toISOString(), full: true });
+          await db.ref(votersPath()).set(obj);
+          await db.ref(metaPath()).set({ count: voters.length, updatedAt: new Date().toISOString(), full: true });
+          if (GP_SLUG) {
+            await db.ref("panchayats/" + GP_SLUG).update({ count: voters.length, updatedAt: new Date().toISOString() });
+          }
           saved = true;
         } catch (e) { console.warn(e); }
       }
       if (!saved) {
-        var res = await fetch(FB_URL + "/voters.json", {
+        var res = await fetch(FB_URL + "/" + votersPath() + ".json", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(obj)
+        });
+        await fetch(FB_URL + "/" + metaPath() + ".json", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ count: voters.length, updatedAt: new Date().toISOString(), full: true })
         });
         if (!res.ok) throw new Error("HTTP " + res.status);
       }
@@ -434,13 +477,13 @@
       if (firebaseReady && db) {
         try {
           var snap = await Promise.race([
-            db.ref("meta").once("value"),
+            db.ref(metaPath()).once("value"),
             new Promise(function (_, rej) { setTimeout(function () { rej(new Error("timeout")); }, 5000); })
           ]);
           return snap.val() || null;
         } catch (e) { console.warn("meta sdk", e); }
       }
-      var res = await fetch(FB_URL + "/meta.json");
+      var res = await fetch(FB_URL + "/" + metaPath() + ".json");
       if (!res.ok) return null;
       return await res.json();
     } catch (e) {
@@ -453,17 +496,18 @@
     if (firebaseReady && db) {
       try {
         var snap = await Promise.race([
-          db.ref("voters").once("value"),
+          db.ref(votersPath()).once("value"),
           new Promise(function (_, rej) { setTimeout(function () { rej(new Error("timeout")); }, 15000); })
         ]);
         data = snap.val();
       } catch (e) { console.warn(e); }
     }
     if (data === null) {
-      var res = await fetch(FB_URL + "/voters.json");
+      var res = await fetch(FB_URL + "/" + votersPath() + ".json");
       if (!res.ok) throw new Error("HTTP " + res.status);
       data = await res.json();
     }
+    // Only this GP path: gp/{slug}/voters — no shared root data
     if (!data) return [];
     var list = Array.isArray(data) ? data.filter(Boolean) : Object.keys(data).map(function (k) { return data[k]; });
     return list;
@@ -511,17 +555,19 @@
     var hasCache = !!(cached && cached.length);
     var cloudHasUpdate = !!(cloudStamp && cloudStamp !== localStamp);
     var noCache = !hasCache;
+    // No meta on this GP path → treat as empty / need fetch (do not trust foreign cache)
+    var noCloudMeta = !cloudStamp;
 
-    // Reload full data ONLY if: no cache OR cloud updatedAt changed
-    if (!(noCache || cloudHasUpdate || (forceCloud && !cloudStamp && noCache))) {
-      // cache valid, cloud same → no full download
+    // Reload ONLY if: no cache OR cloud updated OR this GP has no meta yet
+    if (!(noCache || cloudHasUpdate || noCloudMeta || forceCloud)) {
       hideLoading();
       setSaveBadge("Synced " + voters.length, "bg-success");
-      if (forceCloud && hasCache && !cloudHasUpdate) {
-        // user clicked load but nothing new
-        setSaveBadge("No new updates", "bg-success");
-      }
       if (!voters.length) showEmpty();
+      return;
+    }
+    if (forceCloud && hasCache && cloudStamp && !cloudHasUpdate && !noCloudMeta) {
+      hideLoading();
+      setSaveBadge("No new updates", "bg-success");
       return;
     }
 
@@ -533,12 +579,16 @@
       var list = await downloadFullVoters();
       hideLoading();
       if (!list.length) {
-        if (!voters.length) {
-          showEmpty();
-          if (forceCloud) alert("Database empty");
-        } else {
-          setSaveBadge("Local only", "bg-info");
-        }
+        // This GP has no data — clear any old local cache so blank is correct
+        voters = [];
+        filtered = [];
+        try {
+          localStorage.removeItem(CACHE_KEY);
+          localStorage.removeItem(CACHE_META_KEY);
+        } catch (e) {}
+        showEmpty();
+        setSaveBadge("No data for " + (GP_SLUG || "?"), "bg-secondary");
+        if (forceCloud) alert("Is panchayat (" + GP_SLUG + ") mein cloud par data nahi hai.\nAdmin se Import / Migrate karein.");
         return;
       }
       applyVotersList(list, cloudMeta);
@@ -686,7 +736,7 @@
   function applyFilters() {
     var q = (document.getElementById("searchInput").value || "").trim().toLowerCase();
     var ward = document.getElementById("filterWard").value;
-    var pref = document.getElementById("filterPreference").value;
+    var booth = (document.getElementById("filterBooth") || {}).value || "";
     var status = document.getElementById("filterStatus").value;
 
     filtered = voters.filter(function (v) {
@@ -696,7 +746,7 @@
         if (!tokens.every(function (t) { return hay.indexOf(t) >= 0; })) return false;
       }
       if (ward && String(v.ward_no) !== ward) return false;
-      if (pref && v.preference !== pref) return false;
+      if (booth && String(v.polling_station_no) !== booth) return false;
       if (status === "contacted" && !v.contacted) return false;
       if (status === "not_contacted" && v.contacted) return false;
       if (status === "voted" && !v.voted) return false;
@@ -724,26 +774,44 @@
     document.getElementById("statTotal").textContent = voters.length;
     document.getElementById("statMale").textContent = voters.filter(isMale).length;
     document.getElementById("statFemale").textContent = voters.filter(isFemale).length;
-    document.getElementById("statOurs").textContent = voters.filter(function (v) { return v.preference === "ours"; }).length;
-    document.getElementById("statOther").textContent = voters.filter(function (v) { return v.preference === "other"; }).length;
+    var boothSet = {}, wardSet = {};
+    voters.forEach(function (v) {
+      if (v.polling_station_no) boothSet[String(v.polling_station_no)] = 1;
+      if (v.ward_no) wardSet[String(v.ward_no)] = 1;
+    });
+    var sb = document.getElementById("statBooths");
+    var sw = document.getElementById("statWards");
+    if (sb) sb.textContent = Object.keys(boothSet).length;
+    if (sw) sw.textContent = Object.keys(wardSet).length;
     document.getElementById("statFamilies").textContent = Object.keys(getFamilies()).length;
     document.getElementById("resultCount").textContent = filtered.length + " results";
   }
 
   function refreshUI() {
-    var wards = [];
-    var seen = {};
+    var wards = [], booths = [], seenW = {}, seenB = {};
     voters.forEach(function (v) {
       var w = String(v.ward_no || "");
-      if (w && !seen[w]) { seen[w] = true; wards.push(w); }
+      if (w && !seenW[w]) { seenW[w] = true; wards.push(w); }
+      var b = String(v.polling_station_no || "");
+      if (b && !seenB[b]) { seenB[b] = true; booths.push({ no: b, addr: v.booth_address || "" }); }
     });
     wards.sort(function (a, b) { return Number(a) - Number(b); });
+    booths.sort(function (a, b) { return Number(a.no) - Number(b.no); });
     var sel = document.getElementById("filterWard");
     var cur = sel.value;
     sel.innerHTML = '<option value="">Sabhi Ward</option>' + wards.map(function (w) {
       return '<option value="' + w + '">Ward ' + w + "</option>";
     }).join("");
     sel.value = cur;
+    var bsel = document.getElementById("filterBooth");
+    if (bsel) {
+      var bcur = bsel.value;
+      bsel.innerHTML = '<option value="">Sabhi Booth</option>' + booths.map(function (b) {
+        var label = "Booth " + b.no + (b.addr ? " — " + b.addr : "");
+        return '<option value="' + b.no + '">' + label.replace(/</g, "") + "</option>";
+      }).join("");
+      bsel.value = bcur;
+    }
     applyFilters();
   }
 
@@ -796,9 +864,11 @@
     if (v.old_age || Number(v.age) >= 60) chips += '<span class="status-chip chip-old">60+</span>';
     var checked = selectedIds[v.id] ? " checked" : "";
     var sr = v.serial_no || v.serial_no_2 || "-";
-    return '<div class="voter-card ' + (v.preference || "undecided") + ' p-3">' +
+    var boothNo = v.polling_station_no || "-";
+    var boothAddr = v.booth_address || "";
+    return '<div class="voter-card p-3">' +
       '<div class="d-flex align-items-start gap-2">' +
-      '<div class="form-check mt-1"><input class="form-check-input sel-check" type="checkbox" value="' + v.id + '"' + checked + " style=\"width:1.25rem;height:1.25rem\" /></div>" +
+      '<div class="form-check mt-1"><input class="form-check-input sel-check" type="checkbox" value="' + v.id + '"' + checked + ' style="width:1.25rem;height:1.25rem" /></div>' +
       '<div class="flex-grow-1 open-family" data-id="' + v.id + '" style="cursor:pointer;min-width:0;">' +
       '<div class="d-flex flex-wrap align-items-center gap-2 mb-1">' +
       '<span class="badge bg-primary fs-6">Sr ' + sr + '</span>' +
@@ -809,6 +879,8 @@
       '<div class="fw-bold fs-5 text-dark voter-name">' + esc(v.name || v.name_en || "-") + '</div>' +
       (v.name_en ? '<div class="small text-muted">' + esc(v.name_en) + '</div>' : '') +
       '<div class="small text-muted mt-1">Father: ' + esc(v.relative_name || "-") + ' · Age ' + (v.age || "-") + ' · ' + (v.gender || "") + '</div>' +
+      '<div class="small mt-1"><span class="badge bg-dark">Booth ' + esc(String(boothNo)) + '</span> ' +
+      (boothAddr ? '<span class="text-muted">' + esc(boothAddr) + '</span>' : '') + '</div>' +
       '<div class="mt-1">' + chips + '</div>' +
       (fam.length > 1 ? '<div class="small text-primary mt-1"><i class="bi bi-people"></i> Tap name for full family</div>' : '') +
       '</div>' +
@@ -823,11 +895,11 @@
       return "<tr><td><input type='checkbox' class='sel-check' value='" + v.id + "'" + (selectedIds[v.id] ? " checked" : "") + " /></td>" +
         "<td class='open-family' data-id='" + v.id + "' style='cursor:pointer;color:#0d6efd;font-weight:600'>" + esc(v.name || v.name_en) + "</td><td>" + esc(v.relative_name || "") + "</td><td>" + (v.age || "") + "</td><td>" + (v.gender || "") + "</td>" +
         "<td><strong>" + (v.ward_no || "") + "</strong></td><td>" + esc(v.house_no || "") + "</td><td><strong>" + (v.serial_no || "") + "</strong></td><td>" + fam.length + "</td>" +
-        "<td><span class='badge " + (v.preference === "ours" ? "bg-success" : v.preference === "other" ? "bg-danger" : "bg-secondary") + "'>" + (v.preference || "?") + "</span></td>" +
+        "<td>B" + esc(String(v.polling_station_no || "")) + (v.booth_address ? " <span class='small text-muted'>" + esc(v.booth_address) + "</span>" : "") + "</td>" +
         "<td>" + st + "</td><td><button type='button' class='btn btn-xs btn-outline-primary open-detail' data-id='" + v.id + "'>Edit</button></td></tr>";
     }).join("");
     return '<div class="table-responsive bg-white rounded shadow-sm"><table class="table table-sm table-hover mb-0">' +
-      "<thead class='table-light'><tr><th></th><th>Name</th><th>Father</th><th>Age</th><th>Sex</th><th>Ward</th><th>House</th><th>Sr</th><th>Fam</th><th>Pref</th><th>St</th><th></th></tr></thead>" +
+      "<thead class='table-light'><tr><th></th><th>Name</th><th>Father</th><th>Age</th><th>Sex</th><th>Ward</th><th>House</th><th>Sr</th><th>Booth</th><th>Fam</th><th>St</th><th></th></tr></thead>" +
       "<tbody>" + rows + "</tbody></table></div>";
   }
 
@@ -844,15 +916,14 @@
     sortVoters(fam);
     var rows = fam.map(function (m, i) {
       var sr = m.serial_no || m.serial_no_2 || "-";
-      var prefBadge = m.preference === "ours" ? "bg-success" : m.preference === "other" ? "bg-danger" : "bg-secondary";
       var st = (m.contacted ? "Contacted " : "") + (m.voted ? "Voted " : "") + (m.slip_given ? "Slip " : "");
-      return '<div class="family-row p-3 mb-2 rounded border ' + (m.preference || "undecided") + '" style="background:#fff">' +
+      return '<div class="family-row p-3 mb-2 rounded border" style="background:#fff">' +
         '<div class="d-flex justify-content-between align-items-start gap-2">' +
         '<div style="min-width:0">' +
         '<div class="d-flex flex-wrap gap-2 mb-1">' +
         '<span class="badge bg-primary">Sr ' + sr + '</span>' +
         '<span class="ward-pill">Ward ' + (m.ward_no || "?") + '</span>' +
-        '<span class="badge ' + prefBadge + '">' + (m.preference || "?") + '</span>' +
+        '<span class="badge bg-dark">Booth ' + esc(String(m.polling_station_no || "-")) + '</span>' +
         '</div>' +
         '<div class="fw-bold fs-5">' + esc(m.name || m.name_en || "-") + '</div>' +
         '<div class="small text-muted">Father: ' + esc(m.relative_name || "-") + ' · Age ' + (m.age || "-") + ' · ' + (m.gender || "") + '</div>' +
@@ -866,10 +937,8 @@
       '<div class="mb-2 small text-muted">' + esc(v.address || "") + ' · ' + esc(v.grampanchayat || "") +
       ' · <strong>' + fam.length + ' members</strong></div>' + rows +
       '<div class="mt-3 d-flex flex-wrap gap-2">' +
-      '<button type="button" class="btn btn-success btn-sm fam-bulk" data-key="' + familyKey(v).replace(/"/g, "") + '" data-field="preference" data-val="ours">All Ours</button>' +
-      '<button type="button" class="btn btn-danger btn-sm fam-bulk" data-key="' + familyKey(v).replace(/"/g, "") + '" data-field="preference" data-val="other">All Other</button>' +
-      '<button type="button" class="btn btn-primary btn-sm fam-bulk" data-key="' + familyKey(v).replace(/"/g, "") + '" data-field="contacted" data-val="true">All Contacted</button>' +
-      '<button type="button" class="btn btn-warning btn-sm fam-bulk" data-key="' + familyKey(v).replace(/"/g, "") + '" data-field="slip_given" data-val="true">All Slip</button>' +
+      '<button type="button" class="btn btn-primary btn-sm fam-bulk" data-field="contacted" data-val="true">All Contacted</button>' +
+      '<button type="button" class="btn btn-warning btn-sm fam-bulk" data-field="slip_given" data-val="true">All Slip</button>' +
       '</div>';
     // store key for bulk - use data on buttons via familyKey from first member
     window._famKey = familyKey(v);
@@ -980,8 +1049,8 @@
     // remove node from firebase only
     (async function () {
       try {
-        if (firebaseReady && db) await db.ref("voters/" + delId).remove();
-        else await fetch(FB_URL + "/voters/" + encodeURIComponent(delId) + ".json", { method: "DELETE" });
+        if (firebaseReady && db) await db.ref(voterNodePath(delId)).remove();
+        else await fetch(FB_URL + "/" + voterNodePath(delId) + ".json", { method: "DELETE" });
         setSaveBadge("Deleted", "bg-success");
       } catch (e) { console.warn(e); setSaveBadge("Delete cloud fail", "bg-danger"); }
     })();
@@ -1286,7 +1355,8 @@
   document.getElementById("btnModalLoad").onclick = loadFromFirebase;
   document.getElementById("btnClearSearch").onclick = function () { document.getElementById("searchInput").value = ""; currentPage = 1; applyFilters(); };
   document.getElementById("filterWard").onchange = function () { currentPage = 1; applyFilters(); };
-  document.getElementById("filterPreference").onchange = function () { currentPage = 1; applyFilters(); };
+  var fbEl = document.getElementById("filterBooth");
+  if (fbEl) fbEl.onchange = function () { currentPage = 1; applyFilters(); };
   document.getElementById("filterStatus").onchange = function () { currentPage = 1; applyFilters(); };
   document.getElementById("searchInput").addEventListener("input", function () {
     clearTimeout(searchTimer);
@@ -1343,8 +1413,35 @@
     });
   });
 
+  // GP gate + title
+  var titleEl = document.getElementById("appTitle");
+  var HELP_WA = "https://wa.me/918764134167?text=" + encodeURIComponent("Namaste, mujhe sahi Gram Panchayat voter list link chahiye. Help karein.");
+  if (!GP_SLUG) {
+    // Galat / missing slug → WhatsApp help
+    window.location.href = HELP_WA;
+    return;
+  }
+  if (titleEl) titleEl.textContent = GP_SLUG.toUpperCase();
+  document.title = GP_SLUG + " — Voter Management";
+
+  // Validate slug exists in panchayats list (optional soft check)
+  (async function validateGp() {
+    try {
+      var res = await fetch(FB_URL + "/panchayats/" + encodeURIComponent(GP_SLUG) + ".json");
+      if (!res.ok) return;
+      var p = await res.json();
+      if (p === null) {
+        // slug not registered → help on WhatsApp
+        window.location.href = HELP_WA;
+      } else if (p && p.name && titleEl) {
+        titleEl.textContent = p.name;
+        document.title = p.name + " — Voter Management";
+      }
+    } catch (e) {}
+  })();
+
   showEmpty();
-  // Auto-load from database on page open (no need to click every time)
+  // Auto-load this GP only
   setTimeout(function () {
     window._silentLoad = true; loadFromFirebase().then(function () {
       if (!voters.length) {
